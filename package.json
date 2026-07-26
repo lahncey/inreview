@@ -1,0 +1,23 @@
+{
+  "name": "in-review",
+  "version": "1.0.0",
+  "description": "A Discord bot built with discord.js",
+  "main": "index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js",
+    "setup": "node setup.js",
+    "audit": "node audit.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.4.2"
+  }
+}

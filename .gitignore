@@ -1,0 +1,6 @@
+node_modules/
+.env
+*.log
+
+# Live invite codes for the real server. Local state, never committed.
+invite-map.json
