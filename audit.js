@@ -128,6 +128,28 @@ client.once(Events.ClientReady, async () => {
           console.log(`  ${label.padEnd(14)} ${String(invite.uses).padStart(4)} joins   discord.gg/${code}`);
         }
         console.log(`  ${'total'.padEnd(14)} ${String(total).padStart(4)} joins via tracked links`);
+
+        // Invites made by hand in the Discord client are invisible to the
+        // mapping, so a low tracked total reads as "no joins yet" when it may
+        // really mean "joins arrived somewhere this cannot see".
+        const trackedCodes = new Set(Object.values(saved));
+        const untracked = [...live.values()]
+          .filter((i) => !trackedCodes.has(i.code))
+          .sort((a, b) => b.uses - a.uses);
+
+        if (untracked.length) {
+          const strayJoins = untracked.reduce((n, i) => n + i.uses, 0);
+          console.log(
+            `\n  ${untracked.length} untracked invite(s), ${strayJoins} join(s) with no attribution:`,
+          );
+          for (const i of untracked) {
+            console.log(
+              `    ${i.code.padEnd(12)} ${String(i.uses).padStart(4)} joins  ` +
+                `-> #${i.channel?.name}  by ${i.inviter?.tag ?? '?'}`,
+            );
+          }
+          if (strayJoins) problems += 1;
+        }
       } else {
         console.log('  invite-map.json not found — listing all live invites');
         for (const invite of live.values()) {
