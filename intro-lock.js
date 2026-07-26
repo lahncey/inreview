@@ -162,12 +162,19 @@ async function decide(message, introduced, mod) {
       await message.author.send(DUPLICATE_DM);
       log('  -> DM sent');
     } catch (err) {
-      // Plenty of people have DMs closed. Expected, not a failure.
-      if (err?.code === RESTJSONErrorCodes.CannotSendMessagesToThisUser) {
-        log(`  -> ${message.author.tag} has DMs closed; message still deleted`);
-      } else {
-        warn(`  -> could not DM ${message.author.tag}: ${err?.message ?? err}`);
-      }
+      // Never fatal: the duplicate is already gone, and the DM is a courtesy.
+      // Discord returns more than one code here — 50007 for closed DMs, and
+      // others worded around mutual guilds — so the code is logged rather
+      // than matched on message text, and no case is treated as alarming.
+      const code = err?.code ?? 'none';
+      const known =
+        code === RESTJSONErrorCodes.CannotSendMessagesToThisUser
+          ? 'DMs closed'
+          : `code ${code}`;
+      log(
+        `  -> no DM to ${message.author.tag} (${known}); message still deleted`,
+      );
+      log(`  -> DM error detail: ${err?.message ?? err}`);
     }
     return;
   }
