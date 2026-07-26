@@ -129,9 +129,9 @@ client.once(Events.ClientReady, async () => {
         }
         console.log(`  ${'total'.padEnd(14)} ${String(total).padStart(4)} joins via tracked links`);
 
-        // Invites made by hand in the Discord client are invisible to the
-        // mapping, so a low tracked total reads as "no joins yet" when it may
-        // really mean "joins arrived somewhere this cannot see".
+        // Personal invites are allowed alongside the tracked links, so these
+        // are reported rather than flagged. Without them a tracked total of
+        // zero would read as "nobody joined" when people arrived elsewhere.
         const trackedCodes = new Set(Object.values(saved));
         const untracked = [...live.values()]
           .filter((i) => !trackedCodes.has(i.code))
@@ -140,7 +140,7 @@ client.once(Events.ClientReady, async () => {
         if (untracked.length) {
           const strayJoins = untracked.reduce((n, i) => n + i.uses, 0);
           console.log(
-            `\n  ${untracked.length} untracked invite(s), ${strayJoins} join(s) with no attribution:`,
+            `\n  personal/untracked invites — ${strayJoins} join(s), not attributed:`,
           );
           for (const i of untracked) {
             console.log(
@@ -148,7 +148,7 @@ client.once(Events.ClientReady, async () => {
                 `-> #${i.channel?.name}  by ${i.inviter?.tag ?? '?'}`,
             );
           }
-          if (strayJoins) problems += 1;
+          console.log(`  ${'grand total'.padEnd(14)} ${String(total + strayJoins).padStart(4)} joins from all sources`);
         }
       } else {
         console.log('  invite-map.json not found — listing all live invites');
