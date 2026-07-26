@@ -16,6 +16,14 @@ const DUPLICATE_DM =
   "You've already posted your intro. You can edit your original message " +
   'instead of posting a new one.';
 
+// Both mean "this person cannot be DMed". Discord returns 50278 when someone
+// has DMs from server members switched off — its wording blames a lack of
+// mutual guilds even when the member is right there in the server.
+const DM_BLOCKED_CODES = new Set([
+  RESTJSONErrorCodes.CannotSendMessagesToThisUser,
+  RESTJSONErrorCodes.CannotSendMessagesToThisUserDueToHavingNoMutualGuilds,
+]);
+
 // How far back to look on startup, to catch posts made while offline.
 const RECONCILE_LIMIT = 200;
 const PAGE_SIZE = 100;
@@ -163,18 +171,19 @@ async function decide(message, introduced, mod) {
       log('  -> DM sent');
     } catch (err) {
       // Never fatal: the duplicate is already gone, and the DM is a courtesy.
-      // Discord returns more than one code here — 50007 for closed DMs, and
-      // others worded around mutual guilds — so the code is logged rather
-      // than matched on message text, and no case is treated as alarming.
       const code = err?.code ?? 'none';
-      const known =
-        code === RESTJSONErrorCodes.CannotSendMessagesToThisUser
-          ? 'DMs closed'
-          : `code ${code}`;
-      log(
-        `  -> no DM to ${message.author.tag} (${known}); message still deleted`,
-      );
-      log(`  -> DM error detail: ${err?.message ?? err}`);
+      if (DM_BLOCKED_CODES.has(code)) {
+        log(
+          `  -> no DM to ${message.author.tag} (DMs closed, ${code}); ` +
+            'message still deleted',
+        );
+      } else {
+        // Anything else is worth seeing in full — it is not a case we know.
+        warn(
+          `  -> unexpected DM failure for ${message.author.tag} ` +
+            `[code ${code}]: ${err?.message ?? err}`,
+        );
+      }
     }
     return;
   }
