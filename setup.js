@@ -70,6 +70,10 @@ const ROLE_PERMISSIONS = [];
 const CHANNELS = [
   { name: 'start-here', access: 'readonly' },
   { name: 'introductions', access: 'open' },
+  // explicitSend spells out SendMessages for Introduced rather than relying on
+  // the @everyone guild grant, so this channel keeps working if that baseline
+  // is ever tightened. Threads and slowmode stay at Discord's defaults.
+  { name: 'general', access: 'gated', explicitSend: true },
   // threadOnly: members read and reply inside threads, but cannot post at the
   // top level or start threads of their own. Mod (and the owner, who bypasses
   // overwrites entirely) posts the weekly prompt and opens the thread.
@@ -163,6 +167,7 @@ async function run() {
   await reconcileRolePermissions(roles);
   await orderRoles(guild, roles, me);
   const channels = await createChannels(guild);
+  await orderChannels(guild, channels);
   await lockDownEveryone(guild);
   await applyGating(guild, roles, channels);
   await clearSlowmode(channels);
@@ -350,6 +355,44 @@ async function createChannels(guild) {
   return result;
 }
 
+// Discord positions channels by creation order, so anything added later lands
+// at the bottom no matter where it sits in CHANNELS. This makes the array the
+// source of truth for ordering instead.
+async function orderChannels(guild, channels) {
+  step('Channel order');
+
+  const wanted = CHANNELS.map((spec, index) => ({
+    channel: channels.get(spec.name),
+    position: index,
+    name: spec.name,
+  })).filter((entry) => entry.channel);
+
+  const misplaced = wanted.filter((e) => e.channel.position !== e.position);
+  if (!misplaced.length) {
+    same('channel order');
+    return;
+  }
+
+  try {
+    await guild.channels.setPositions(
+      wanted.map((e) => ({ channel: e.channel.id, position: e.position })),
+    );
+    add(`reordered ${misplaced.length} channel(s) to match CHANNELS`);
+  } catch (err) {
+    warn(`Could not set channel positions: ${err?.message ?? err}`);
+    warn('Drag them into order manually in Discord.');
+  }
+
+  await guild.channels.fetch();
+  const category = guild.channels.cache.find(
+    (c) => c.type === ChannelType.GuildCategory && c.name === 'In Review',
+  );
+  const actual = [...guild.channels.cache.values()]
+    .filter((c) => c.parentId === category?.id && c.type === ChannelType.GuildText)
+    .sort((a, b) => a.position - b.position);
+  actual.forEach((c, i) => console.log(`    ${String(i + 1).padStart(2)}. #${c.name}`));
+}
+
 async function lockDownEveryone(guild) {
   step('@everyone guild permissions');
   const everyone = guild.roles.everyone;
@@ -448,16 +491,17 @@ async function applyGating(guild, roles, channels) {
         });
       }
 
+      const introducedPayload = { ViewChannel: true };
+      if (spec.explicitSend) introducedPayload.SendMessages = true;
+
       await channel.permissionOverwrites.edit(everyone, everyonePayload, {
         reason: REASON,
       });
-      // ViewChannel only. The @everyone allow of SendMessagesInThreads
-      // survives because role overwrites merge rather than replace.
-      await channel.permissionOverwrites.edit(
-        introduced,
-        { ViewChannel: true },
-        { reason: REASON },
-      );
+      // The @everyone allow of SendMessagesInThreads survives here because
+      // role overwrites merge rather than replace.
+      await channel.permissionOverwrites.edit(introduced, introducedPayload, {
+        reason: REASON,
+      });
       // Mods never receive Introduced, so without this they would be shut
       // out of every community channel on the server.
       await channel.permissionOverwrites.edit(mod, modPayload, {

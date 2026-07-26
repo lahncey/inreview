@@ -23,6 +23,7 @@ if (!DISCORD_TOKEN || !GUILD_ID) {
 const ORDER = [
   'start-here',
   'introductions',
+  'general',
   'job-hunt',
   'ask-anything',
   'roles-and-referrals',

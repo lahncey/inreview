@@ -1,4 +1,4 @@
-import { Events } from 'discord.js';
+import { Events, RESTJSONErrorCodes } from 'discord.js';
 
 // Post once in #introductions and you pick up the Introduced role, which
 // grants ViewChannel on the gated channels. Nothing denies the member
@@ -29,6 +29,38 @@ const warn = (msg) => console.warn(`intro-lock: ${msg}`);
 // serialized per author so only one decision for a given person is ever in
 // flight.
 const queues = new Map();
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// discord.js queues around rate limits itself, so a 429 reaching here means
+// something unusual. Retry rather than drop the grant on the floor — a member
+// who never receives the role never gets into the server.
+async function grantRole(member, role, reason, attempts = 3) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await member.roles.add(role, reason);
+      return true;
+    } catch (err) {
+      const rateLimited = err?.status === 429;
+      if (!rateLimited || attempt === attempts) {
+        warn(
+          `could not grant ${role.name} to ${member.user.tag}: ${err?.message ?? err}`,
+        );
+        return false;
+      }
+
+      // Units vary between discord.js error shapes, so clamp to something sane.
+      const raw = err?.timeToReset ?? err?.retryAfter ?? 2000;
+      const waitMs = Math.min(Math.max(raw > 1000 ? raw : raw * 1000, 1000), 30000);
+      warn(
+        `rate limited granting to ${member.user.tag}, ` +
+          `retrying in ${waitMs}ms (attempt ${attempt}/${attempts})`,
+      );
+      await sleep(waitMs);
+    }
+  }
+  return false;
+}
 
 function serialize(key, task) {
   const previous = queues.get(key) ?? Promise.resolve();
@@ -118,6 +150,7 @@ async function decide(message, introduced, mod) {
   if (member.roles.cache.has(introduced.id)) {
     log(`  -> duplicate from ${message.author.tag}, deleting`);
 
+    // Deletion first, so a failed DM never leaves the duplicate standing.
     try {
       await message.delete();
       log('  -> deleted');
@@ -125,18 +158,24 @@ async function decide(message, introduced, mod) {
       warn(`  -> could not delete: ${err?.message ?? err}`);
     }
 
-    // Closed DMs are common and are not an error worth failing over.
     try {
       await message.author.send(DUPLICATE_DM);
       log('  -> DM sent');
     } catch (err) {
-      warn(`  -> could not DM ${message.author.tag}: ${err?.message ?? err}`);
+      // Plenty of people have DMs closed. Expected, not a failure.
+      if (err?.code === RESTJSONErrorCodes.CannotSendMessagesToThisUser) {
+        log(`  -> ${message.author.tag} has DMs closed; message still deleted`);
+      } else {
+        warn(`  -> could not DM ${message.author.tag}: ${err?.message ?? err}`);
+      }
     }
     return;
   }
 
-  await member.roles.add(introduced, 'Posted in #introductions');
-  log(`  -> GRANT ${INTRODUCED_ROLE} to ${message.author.tag} (${member.id})`);
+  const granted = await grantRole(member, introduced, 'Posted in #introductions');
+  if (granted) {
+    log(`  -> GRANT ${INTRODUCED_ROLE} to ${message.author.tag} (${member.id})`);
+  }
 }
 
 // Catches anyone who posted while the bot was down.
@@ -188,12 +227,15 @@ async function reconcile(client, guildId) {
       continue;
     }
 
-    try {
-      await member.roles.add(introduced, 'Reconciliation: posted in #introductions');
+    const ok = await grantRole(
+      member,
+      introduced,
+      'Reconciliation: posted in #introductions',
+    );
+    if (ok) {
       log(`GRANT ${INTRODUCED_ROLE} to ${member.user.tag} (${member.id}) [backfill]`);
       granted += 1;
-    } catch (err) {
-      warn(`could not grant to ${member.user.tag}: ${err?.message ?? err}`);
+    } else {
       skipped += 1;
     }
   }

@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { Client, Events, GatewayIntentBits } from 'discord.js';
 import { installIntroLock } from './intro-lock.js';
+import { installHeartbeat } from './heartbeat.js';
 
 const { DISCORD_TOKEN, GUILD_ID } = process.env;
 
@@ -47,6 +48,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 installIntroLock(client, GUILD_ID);
+installHeartbeat(client, GUILD_ID);
 
 // Hosts commonly restart only on a non-zero exit, so anything fatal has to
 // exit non-zero rather than letting the process wind down quietly. discord.js
@@ -76,8 +78,13 @@ client.on(Events.Invalidated, () => {
   fatal('Session invalidated and cannot reconnect. Exiting for a restart.');
 });
 
+// Full stacks, because Railway's log is the only place the cause will appear.
 process.on('unhandledRejection', (err) => {
   fatal(`Unhandled rejection: ${err?.stack ?? err}`);
+});
+
+process.on('uncaughtException', (err) => {
+  fatal(`Uncaught exception: ${err?.stack ?? err}`);
 });
 
 client.login(DISCORD_TOKEN).catch((err) => {

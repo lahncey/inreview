@@ -14,6 +14,7 @@ Built with [discord.js](https://discord.js.org) v14 on Node 20+.
 | `setup.js` | One-shot, idempotent server configuration — roles, channels, permission overwrites, invites, onboarding. Run by hand. |
 | `index.js` | The long-running bot. |
 | `intro-lock.js` | The access-granting logic. |
+| `heartbeat.js` | Posts to `#mod-updates` on start and every 12 hours. |
 | `audit.js` | Read-only snapshot of live server state. Changes nothing. |
 
 ```bash
@@ -64,6 +65,11 @@ author, with a forced member fetch inside the critical section.
 **Downtime is recoverable.** On startup the bot scans recent history in
 `#introductions` and back-fills anyone who posted while it was offline, so a
 restart costs a delay rather than data.
+
+**Silent death is the dangerous failure.** Because access depends on the bot,
+a dead process means members join, introduce themselves, and nothing unlocks —
+with no sign anything is wrong. It posts to `#mod-updates` on start and every
+12 hours, so a stale timestamp is the signal.
 
 ## Setup
 
