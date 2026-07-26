@@ -4,13 +4,20 @@ import { installIntroLock } from './intro-lock.js';
 
 const { DISCORD_TOKEN, GUILD_ID } = process.env;
 
-if (!DISCORD_TOKEN) {
-  console.error('Missing DISCORD_TOKEN in .env');
-  process.exit(1);
-}
+// Reported together, so a second missing variable does not only surface after
+// the first is fixed and redeployed. The .env file is a local convenience —
+// on a host these come from the platform, so the message says both.
+const missing = Object.entries({ DISCORD_TOKEN, GUILD_ID })
+  .filter(([, value]) => !value)
+  .map(([name]) => name);
 
-if (!GUILD_ID) {
-  console.error('Missing GUILD_ID in .env (required by the intro lock)');
+if (missing.length) {
+  console.error(`Missing required environment variable(s): ${missing.join(', ')}`);
+  console.error('Locally: set them in .env');
+  console.error(
+    "On a host: set them in the service's own variables settings — " +
+      'there is no .env file there',
+  );
   process.exit(1);
 }
 
