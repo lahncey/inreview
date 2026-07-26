@@ -4,3 +4,6 @@ node_modules/
 
 # Live invite codes for the real server. Local state, never committed.
 invite-map.json
+
+# Throwaway diagnostic scripts.
+_*.js
