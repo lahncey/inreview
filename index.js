@@ -28,7 +28,14 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, (readyClient) => {
-  console.log(`Logged in as ${readyClient.user.tag}`);
+  // Railway sets this automatically. Logging it means the running commit is
+  // visible in the deploy log, instead of having to match a build in the UI
+  // against a hash.
+  const commit = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7);
+  console.log(
+    `Logged in as ${readyClient.user.tag}` +
+      (commit ? ` — running commit ${commit}` : ' — local (no commit info)'),
+  );
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
