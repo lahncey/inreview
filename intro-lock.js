@@ -1,5 +1,6 @@
 import { Events, RESTJSONErrorCodes } from 'discord.js';
 import { resolveChannel } from './channel-map.js';
+import { resolveRole } from './role-map.js';
 
 // Post once in #introductions and you pick up the Introduced role, which
 // grants ViewChannel on the gated channels. Nothing denies the member
@@ -102,8 +103,10 @@ function resolve(guild) {
   const channel = resolveChannel(guild, INTRO_CHANNEL);
   return {
     channel: channel?.isTextBased() ? channel : null,
-    introduced: guild.roles.cache.find((r) => r.name === INTRODUCED_ROLE),
-    mod: guild.roles.cache.find((r) => r.name === MOD_ROLE),
+    // Also by id: a renamed Introduced role would otherwise leave the bot
+    // granting nobody access, while the heartbeat kept reporting healthy.
+    introduced: resolveRole(guild, INTRODUCED_ROLE),
+    mod: resolveRole(guild, MOD_ROLE),
   };
 }
 

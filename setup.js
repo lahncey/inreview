@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readChannelMap, writeChannelMap } from './channel-map.js';
+import { readRoleMap, writeRoleMap } from './role-map.js';
 import {
   Client,
   Events,
@@ -183,11 +184,24 @@ async function createRoles(guild) {
   await guild.roles.fetch();
   const created = new Map();
 
+  const map = readRoleMap();
+
   for (const name of ROLE_ORDER) {
-    const existing = guild.roles.cache.find((r) => r.name === name);
+    // Stored id first. A role renamed in Discord still matches, so setup will
+    // not create a duplicate and move the channel overwrites onto it — which
+    // would strip access from everyone holding the renamed original.
+    const mapped = map[name] ? guild.roles.cache.get(map[name]) : null;
+    const existing = mapped ?? guild.roles.cache.find((r) => r.name === name);
+
     if (existing) {
-      same(`role "${name}"`);
+      if (existing.name === name) {
+        same(`role "${name}"`);
+      } else {
+        add(`role "${name}" is now named "${existing.name}" — matched by id`);
+        console.log('    no duplicate created; config applied to the existing role');
+      }
       created.set(name, existing);
+      map[name] = existing.id;
       continue;
     }
     const role = await guild.roles.create({
@@ -199,8 +213,10 @@ async function createRoles(guild) {
     });
     add(`role "${name}" (no permissions${role.hoist ? ', hoisted' : ''})`);
     created.set(name, role);
+    map[name] = role.id;
   }
 
+  writeRoleMap(map);
   return created;
 }
 
