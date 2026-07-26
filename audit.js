@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   Client,
   Events,
@@ -6,6 +7,8 @@ import {
   OverwriteType,
   PermissionFlagsBits,
 } from 'discord.js';
+
+const INVITE_MAP_PATH = new URL('./invite-map.json', import.meta.url);
 
 // Read-only snapshot of the live server. Changes nothing. Run it after any
 // setup change, and after a real member joins, to confirm the server actually
@@ -99,6 +102,41 @@ client.once(Events.ClientReady, async () => {
       `\n  member-type overwrites across all channels: ${memberOverwrites}` +
         (memberOverwrites ? '  <-- role model is being bypassed' : '  (good)'),
     );
+
+    // The whole point of cutting five separate invites is knowing which
+    // channel actually brings people in. This is where you read that.
+    console.log('\n== Invites ==');
+    try {
+      const live = await guild.invites.fetch();
+      const saved = existsSync(INVITE_MAP_PATH)
+        ? JSON.parse(readFileSync(INVITE_MAP_PATH, 'utf8'))
+        : null;
+
+      if (saved) {
+        const ranked = Object.entries(saved)
+          .map(([label, code]) => ({ label, code, invite: live.get(code) }))
+          .sort((a, b) => (b.invite?.uses ?? -1) - (a.invite?.uses ?? -1));
+
+        let total = 0;
+        for (const { label, code, invite } of ranked) {
+          if (!invite) {
+            console.log(`  ${label.padEnd(14)} ${code}  DEAD — no longer on the server`);
+            problems += 1;
+            continue;
+          }
+          total += invite.uses;
+          console.log(`  ${label.padEnd(14)} ${String(invite.uses).padStart(4)} joins   discord.gg/${code}`);
+        }
+        console.log(`  ${'total'.padEnd(14)} ${String(total).padStart(4)} joins via tracked links`);
+      } else {
+        console.log('  invite-map.json not found — listing all live invites');
+        for (const invite of live.values()) {
+          console.log(`  ${invite.code}  ${invite.uses} joins  -> #${invite.channel?.name}`);
+        }
+      }
+    } catch (err) {
+      console.log(`  could not read invites: ${err?.message ?? err}`);
+    }
 
     console.log('\n== Onboarding ==');
     try {
