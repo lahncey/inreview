@@ -37,10 +37,15 @@ async function beat(client, guildId) {
     }
 
     // Discord renders these in the reader's own timezone, and the relative form
-    // is what makes a stale heartbeat obvious at a glance.
+    // is what makes a stale heartbeat obvious at a glance. The commit is here
+    // so "which version is live" is answerable from Discord — otherwise a test
+    // run against a not-yet-finished deploy looks like a bug in the code.
     const unix = Math.floor(Date.now() / 1000);
-    await channel.send(`Bot online — <t:${unix}:F> (<t:${unix}:R>)`);
-    log('posted');
+    const commit = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local';
+    await channel.send(
+      `Bot online — <t:${unix}:F> (<t:${unix}:R>) · commit \`${commit}\``,
+    );
+    log(`posted (commit ${commit})`);
   } catch (err) {
     warn(`could not post: ${err?.message ?? err}`);
   }
