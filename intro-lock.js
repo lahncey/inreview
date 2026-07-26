@@ -1,4 +1,5 @@
 import { Events, RESTJSONErrorCodes } from 'discord.js';
+import { resolveChannel } from './channel-map.js';
 
 // Post once in #introductions and you pick up the Introduced role, which
 // grants ViewChannel on the gated channels. Nothing denies the member
@@ -95,10 +96,12 @@ export function installIntroLock(client, guildId) {
 }
 
 function resolve(guild) {
+  // By id via channel-map.json, falling back to name. Renaming the channel in
+  // Discord would otherwise stop the bot finding it at all, which is a worse
+  // failure than anything setup could do — access would silently stop working.
+  const channel = resolveChannel(guild, INTRO_CHANNEL);
   return {
-    channel: guild.channels.cache.find(
-      (c) => c.name === INTRO_CHANNEL && c.isTextBased(),
-    ),
+    channel: channel?.isTextBased() ? channel : null,
     introduced: guild.roles.cache.find((r) => r.name === INTRODUCED_ROLE),
     mod: guild.roles.cache.find((r) => r.name === MOD_ROLE),
   };

@@ -1,4 +1,5 @@
 import { Events } from 'discord.js';
+import { resolveChannel } from './channel-map.js';
 
 // The bot is load-bearing: if it dies, members join, post an intro, and never
 // receive the role that unlocks the server. Nothing about that is visible from
@@ -28,10 +29,10 @@ async function beat(client, guildId) {
     const guild = await client.guilds.fetch(guildId);
     await guild.channels.fetch();
 
-    const channel = guild.channels.cache.find(
-      (c) => c.name === CHANNEL && c.isTextBased(),
-    );
-    if (!channel) {
+    // By id via channel-map.json, falling back to name, so renaming the
+    // channel does not silently stop the health signal.
+    const channel = resolveChannel(guild, CHANNEL);
+    if (!channel?.isTextBased()) {
       warn(`#${CHANNEL} not found, skipping`);
       return;
     }

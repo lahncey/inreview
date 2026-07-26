@@ -110,9 +110,16 @@ message: double role grants, double deletions, two DMs.
 `setup.js` reuses them instead of cutting new ones on every run. Deleting it
 means new invites and a broken attribution mapping.
 
-## Channels are matched by name
+## Renaming channels is safe
 
-`setup.js`, `audit.js` and `intro-lock.js` all resolve channels and roles by
-name. Renaming a channel in the Discord UI makes `setup.js` treat it as missing
-and create a duplicate. Update the `CHANNELS` list in `setup.js` and `ORDER` in
-`audit.js` to match. `npm run audit` warns about channels it doesn't recognise.
+`channel-map.json` pins each channel by id, so renaming one in the Discord UI
+changes nothing functional — `setup.js` matches by id and reports the new name,
+`audit.js` shows it as `#old (now #new)`, and the bot keeps watching the right
+channel. Nothing needs editing.
+
+The map is committed, unlike `invite-map.json`: channel ids are not secrets, and
+the bot needs it at runtime. If it is missing or corrupt, everything degrades to
+name matching, which is where this started.
+
+**Roles are still matched by name.** Renaming `Introduced` or `Mod` will break
+the bot. Only channels are pinned.

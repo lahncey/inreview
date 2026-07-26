@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readChannelMap, writeChannelMap } from './channel-map.js';
 import {
   Client,
   Events,
@@ -311,13 +312,29 @@ async function createChannels(guild) {
     add('category "In Review"');
   }
 
+  const map = readChannelMap();
+
   for (const spec of CHANNELS) {
-    const existing = guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildText && c.name === spec.name,
-    );
+    // Stored id first. A channel renamed in the Discord UI still matches, so
+    // no duplicate gets created under the old name.
+    const mapped = map[spec.name]
+      ? guild.channels.cache.get(map[spec.name])
+      : null;
+    const existing =
+      mapped ??
+      guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name === spec.name,
+      );
+
     if (existing) {
-      same(`#${spec.name}`);
+      if (existing.name === spec.name) {
+        same(`#${spec.name}`);
+      } else {
+        add(`#${spec.name} is now named #${existing.name} — matched by id`);
+        console.log('    config applied correctly; rename CHANNELS to match if you want tidier logs');
+      }
       result.set(spec.name, existing);
+      map[spec.name] = existing.id;
       continue;
     }
 
@@ -338,18 +355,21 @@ async function createChannels(guild) {
 
     add(`#${spec.name} (${spec.access})`);
     result.set(spec.name, channel);
+    map[spec.name] = channel.id;
   }
 
-  // A channel renamed in the Discord UI stops matching CHANNELS, and the
-  // next run would happily create a duplicate under the old name. Surface
-  // any stranger sitting in the category instead.
-  const managed = new Set(CHANNELS.map((c) => c.name));
+  writeChannelMap(map);
+
+  // Anything in the category that is neither a known name nor a mapped id is
+  // genuinely unmanaged — a channel somebody added by hand, not a rename.
+  const managedNames = new Set(CHANNELS.map((c) => c.name));
+  const managedIds = new Set(Object.values(map));
   for (const channel of guild.channels.cache.values()) {
     if (channel.parentId !== category.id) continue;
     if (channel.type !== ChannelType.GuildText) continue;
-    if (managed.has(channel.name)) continue;
-    warn(`#${channel.name} sits in the category but is not in CHANNELS`);
-    warn('  renamed? add it to CHANNELS or setup will create a duplicate');
+    if (managedNames.has(channel.name) || managedIds.has(channel.id)) continue;
+    warn(`#${channel.name} sits in the category but is not managed by setup`);
+    warn('  add it to CHANNELS if it should be');
   }
 
   return result;

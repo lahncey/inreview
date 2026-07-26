@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { existsSync, readFileSync } from 'node:fs';
+import { readChannelMap, resolveChannel } from './channel-map.js';
 import {
   Client,
   Events,
@@ -51,18 +52,20 @@ client.once(Events.ClientReady, async () => {
     console.log(`Guild: ${guild.name} (${guild.id})\n`);
 
     console.log('== Channels ==');
+    const channelMap = readChannelMap();
     for (const name of ORDER) {
-      const channel = guild.channels.cache.find(
-        (c) => c.name === name && c.isTextBased(),
-      );
-      if (!channel) {
+      const channel = resolveChannel(guild, name, channelMap);
+      if (!channel?.isTextBased()) {
         console.log(`  #${name} — MISSING`);
         problems += 1;
         continue;
       }
 
       const slow = channel.rateLimitPerUser;
-      console.log(`  #${name}${slow ? `  [slowmode ${slow}s]` : ''}`);
+      // A rename is fine because the id still matches; it is only worth
+      // showing so the label here lines up with what Discord displays.
+      const renamed = channel.name === name ? '' : `  (now #${channel.name})`;
+      console.log(`  #${name}${renamed}${slow ? `  [slowmode ${slow}s]` : ''}`);
 
       for (const [id, ow] of channel.permissionOverwrites.cache) {
         // A member-type overwrite is the thing to watch for. Discord caps
