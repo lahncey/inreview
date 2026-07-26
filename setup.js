@@ -29,7 +29,14 @@ const warn = (msg) => console.log(`  ! ${msg}`);
 const step = (msg) => console.log(`\n== ${msg}`);
 
 // Top of the list first. Position is applied after all roles exist.
+// SPECIAL_ROLES is also what drives hoisting, so anything added here shows as
+// its own group in the member list.
 const SPECIAL_ROLES = ['Mod', 'Professional'];
+
+// Onboarding hands this out when someone says they work in the field. It is
+// deliberately not hoisted and not in SPECIAL_ROLES: the visible Professional
+// badge stays a manual grant, so seeing it means a human actually checked.
+const PENDING_PROFESSIONAL = 'Professional (Unverified)';
 const COHORT_ROLES = [
   'Freshman/Sophomore',
   'Junior',
@@ -56,6 +63,7 @@ const ACCESS_ROLE = 'Member';
 const UTILITY_ROLES = [ACCESS_ROLE];
 const ROLE_ORDER = [
   ...SPECIAL_ROLES,
+  PENDING_PROFESSIONAL,
   ...COHORT_ROLES,
   ...FUNCTION_ROLES,
   ...UTILITY_ROLES,
@@ -139,7 +147,8 @@ const STAGE_OPTIONS = [
   ['Graduating this year', 'Graduating This Year'],
   ['Recently graduated', 'Recent Grad'],
   ['Working, looking to switch into business or tech', 'Career Switcher'],
-  ['I work in the field and want to help', 'Professional'],
+  // Unverified on purpose — the hoisted Professional badge is granted by hand.
+  ['I work in the field and want to help', PENDING_PROFESSIONAL],
 ];
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -170,7 +179,7 @@ async function run() {
   }
 
   const roles = await createRoles(guild);
-  await reconcileRolePermissions(roles);
+  await reconcileRolePermissions(guild, roles);
   await orderRoles(guild, roles, me);
   const channels = await createChannels(guild);
   await orderChannels(guild, channels);
@@ -228,29 +237,47 @@ async function createRoles(guild) {
 // pinning above still carry @everyone's old defaults — including the very
 // permissions the lockdown denies. Strip only those, leaving any deliberate
 // grants in place so this stays safe to re-run.
-async function reconcileRolePermissions(roles) {
+async function reconcileRolePermissions(guild, roles) {
   step('Role permission hygiene');
-  const denyFlags = EVERYONE_DENY.map((p) => PermissionFlagsBits[p]);
+
+  const denyMask = EVERYONE_DENY.reduce(
+    (acc, p) => acc | PermissionFlagsBits[p],
+    0n,
+  );
+  const everyoneMask = guild.roles.everyone.permissions.bitfield;
   let cleaned = 0;
 
   for (const name of ROLE_ORDER) {
     const role = roles.get(name);
     if (!role) continue;
 
-    const held = EVERYONE_DENY.filter((p) =>
-      role.permissions.has(PermissionFlagsBits[p]),
-    );
-    if (!held.length) continue;
+    const current = role.permissions.bitfield;
+    if (current === 0n) continue;
 
-    const next = new PermissionsBitField(role.permissions.bitfield).remove(
-      denyFlags,
-    );
-    await role.setPermissions(next, REASON);
-    add(`"${name}": removed ${held.join(', ')}`);
+    // Always drop the denied set — a role created before the lockdown would
+    // still be carrying it.
+    let next = current & ~denyMask;
+
+    // Then, if what remains grants nothing @everyone does not already grant,
+    // it is inherited default noise. Clearing it matters because otherwise a
+    // future tightening of @everyone would be silently undone by these roles.
+    // Anything genuinely beyond @everyone is a deliberate grant and survives.
+    const beyondEveryone = next & ~everyoneMask;
+    if (beyondEveryone === 0n) next = 0n;
+
+    if (next === current) continue;
+
+    await role.setPermissions(new PermissionsBitField(next), REASON);
+    if (next === 0n) {
+      add(`"${name}": cleared inherited permissions`);
+    } else {
+      const kept = new PermissionsBitField(beyondEveryone).toArray();
+      add(`"${name}": dropped denied permissions, kept ${kept.join(', ')}`);
+    }
     cleaned += 1;
   }
 
-  if (!cleaned) same('role permissions (nothing to strip)');
+  if (!cleaned) same('role permissions (all clean)');
 }
 
 // Each new role is inserted at the bottom, pushing earlier ones up, so
@@ -282,18 +309,29 @@ async function orderRoles(guild, roles, me) {
     );
   }
 
-  try {
-    await guild.roles.setPositions(
-      ROLE_ORDER.map((name, i) => ({
-        role: roles.get(name).id,
-        position: Math.max(1, top - i),
-      })),
-    );
-    add(`reordered ${ROLE_ORDER.length} roles`);
-  } catch (err) {
-    warn(`Could not set role positions: ${err?.message ?? err}`);
-    warn('Check the order below and drag manually if it is wrong.');
+  // Bulk guild.roles.setPositions() returns Missing Permissions here even with
+  // Administrator and every target position below the bot's own role. Moving
+  // roles one at a time works, so do that. Discord shifts the rest as each one
+  // lands, which is why most iterations find nothing to do.
+  let moved = 0;
+  for (let i = 0; i < ROLE_ORDER.length; i += 1) {
+    const role = roles.get(ROLE_ORDER[i]);
+    if (!role) continue;
+
+    const wanted = Math.max(1, top - i);
+    await guild.roles.fetch();
+    if (guild.roles.cache.get(role.id)?.position === wanted) continue;
+
+    try {
+      await role.setPosition(wanted, { reason: REASON });
+      moved += 1;
+    } catch (err) {
+      warn(`could not move "${role.name}": ${err?.message ?? err}`);
+    }
   }
+
+  if (moved) add(`moved ${moved} role(s) into place`);
+  else same('role order (already correct)');
 
   await guild.roles.fetch();
   printOrder(roles);
@@ -787,7 +825,7 @@ async function configureOnboarding(guild, roles, channels) {
       {
         id: '1',
         type: 0, // MULTIPLE_CHOICE
-        title: 'What are you aiming at?',
+        title: 'What area are you in, or aiming for?',
         single_select: false,
         required: true,
         in_onboarding: true,
