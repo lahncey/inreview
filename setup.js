@@ -94,14 +94,18 @@ const CHANNELS = [
 ];
 
 const EVERYONE_DENY = [
-  'CreateInstantInvite',
   'MentionEveryone',
   'ManageMessages',
   'ManageThreads',
   'ManageNicknames',
 ];
 
+// CreateInstantInvite was originally denied here. It is granted now so members
+// can invite people themselves. Those invites are not attributable — only the
+// five tracked links in invite-map.json are — which is a deliberate trade of
+// measurement for growth.
 const EVERYONE_ALLOW = [
+  'CreateInstantInvite',
   'SendMessages',
   'ReadMessageHistory',
   'AddReactions',
