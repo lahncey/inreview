@@ -41,4 +41,38 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 installIntroLock(client, GUILD_ID);
 
-client.login(DISCORD_TOKEN);
+// Hosts commonly restart only on a non-zero exit, so anything fatal has to
+// exit non-zero rather than letting the process wind down quietly. discord.js
+// reconnects from ordinary network drops on its own; these are the cases it
+// cannot recover from.
+let exiting = false;
+
+// Exiting while the websocket is still tearing down trips a libuv assertion,
+// which buries the real error. Set the code, close the client, and let the
+// event loop drain. The timer is a backstop for a handle that never closes,
+// and is unref'd so it cannot itself hold the process open.
+function fatal(message) {
+  if (exiting) return;
+  exiting = true;
+
+  console.error(message);
+  process.exitCode = 1;
+  client.destroy().catch(() => {});
+  setTimeout(() => process.exit(1), 2000).unref();
+}
+
+client.on(Events.Error, (err) => {
+  console.error('Discord client error:', err?.message ?? err);
+});
+
+client.on(Events.Invalidated, () => {
+  fatal('Session invalidated and cannot reconnect. Exiting for a restart.');
+});
+
+process.on('unhandledRejection', (err) => {
+  fatal(`Unhandled rejection: ${err?.stack ?? err}`);
+});
+
+client.login(DISCORD_TOKEN).catch((err) => {
+  fatal(`Login failed: ${err?.message ?? err}`);
+});
