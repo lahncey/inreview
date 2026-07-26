@@ -46,10 +46,14 @@ const FUNCTION_ROLES = [
   'Finance',
   'Still Figuring It Out',
 ];
-// Utility roles carry no permissions and sit at the bottom. "Introduced" is
-// the access key: holding it grants ViewChannel on the gated channels. It
+// The access key: holding it grants ViewChannel on the gated channels. It
 // grants access rather than removing it, so it never blocks editing.
-const UTILITY_ROLES = ['Introduced'];
+// Named once here — renaming it in Discord is safe either way, since
+// role-map.json pins the id, but keeping this in step keeps the logs honest.
+const ACCESS_ROLE = 'Member';
+
+// Utility roles carry no permissions and sit at the bottom.
+const UTILITY_ROLES = [ACCESS_ROLE];
 const ROLE_ORDER = [
   ...SPECIAL_ROLES,
   ...COHORT_ROLES,
@@ -67,12 +71,12 @@ const ROLE_PERMISSIONS = [];
 // access:
 //   readonly — @everyone sees it, cannot post
 //   open     — @everyone sees it and posts in it
-//   gated    — hidden until the member holds Introduced
+//   gated    — hidden until the member holds the access role
 //   mod      — hidden from everyone but Mod
 const CHANNELS = [
   { name: 'start-here', access: 'readonly' },
   { name: 'introductions', access: 'open' },
-  // explicitSend spells out SendMessages for Introduced rather than relying on
+  // explicitSend spells out SendMessages for the access role rather than relying on
   // the @everyone guild grant, so this channel keeps working if that baseline
   // is ever tightened. Threads and slowmode stay at Discord's defaults.
   { name: 'general', access: 'gated', explicitSend: true },
@@ -89,9 +93,9 @@ const CHANNELS = [
     threadOnly: true,
     autoArchive: ThreadAutoArchiveDuration.OneWeek,
   },
-  // Renamed from ask-a-pro in the Discord UI on 2026-07-26. Channels are
-  // matched by name, so this list has to track renames or setup will create
-  // a duplicate.
+  // Renamed from ask-a-pro in the Discord UI on 2026-07-26, before ids were
+  // pinned. The name here is only a label now; channel-map.json is what
+  // actually identifies it.
   { name: 'ask-anything', access: 'gated' },
   { name: 'roles-and-referrals', access: 'gated' },
   { name: 'resume-and-portfolio', access: 'gated' },
@@ -450,18 +454,18 @@ async function lockDownEveryone(guild) {
 // channels that already exist. Role overwrites only — never per-member ones,
 // which Discord caps at 500 per channel.
 //
-// Introduced now grants access instead of removing it. Nothing denies the
+// The access role now grants access instead of removing it. Nothing denies the
 // member anything in #introductions, so they can always edit their own post;
 // duplicate handling moved to the bot, which deletes and DMs instead.
 async function applyGating(guild, roles, channels) {
   step('Access gating');
 
   const everyone = guild.roles.everyone;
-  const introduced = roles.get('Introduced');
+  const introduced = roles.get(ACCESS_ROLE);
   const mod = roles.get('Mod');
 
   if (!introduced || !mod) {
-    warn('Introduced or Mod role missing, skipping gating.');
+    warn(`${ACCESS_ROLE} or Mod role missing, skipping gating.`);
     return;
   }
 
@@ -498,12 +502,12 @@ async function applyGating(guild, roles, channels) {
       );
       add(`#${spec.name}: @everyone view and send, threads closed`);
 
-      // The old model denied SendMessages to Introduced here. Remove it
+      // The old model denied SendMessages to the access role here. Remove it
       // outright, otherwise members stay blocked from editing.
       const stale = channel.permissionOverwrites.cache.get(introduced.id);
       if (stale) {
         await stale.delete(REASON);
-        add(`#${spec.name}: removed the old Introduced deny`);
+        add(`#${spec.name}: removed the old ${ACCESS_ROLE} deny`);
       }
     }
 
@@ -538,14 +542,14 @@ async function applyGating(guild, roles, channels) {
       await channel.permissionOverwrites.edit(introduced, introducedPayload, {
         reason: REASON,
       });
-      // Mods never receive Introduced, so without this they would be shut
+      // Mods never receive the access role, so without this they would be shut
       // out of every community channel on the server.
       await channel.permissionOverwrites.edit(mod, modPayload, {
         reason: REASON,
       });
 
       add(
-        `#${spec.name}: hidden, visible to Introduced and Mod` +
+        `#${spec.name}: hidden, visible to ${ACCESS_ROLE} and Mod` +
           (spec.threadOnly ? ' — thread-only posting' : ''),
       );
 
@@ -591,7 +595,7 @@ function verifyGating(channels, everyone, introduced, mod) {
 
   const intro = channels.get('introductions');
   check(
-    'introductions has no Introduced overwrite',
+    `introductions has no ${ACCESS_ROLE} overwrite`,
     !intro.permissionOverwrites.cache.has(introduced.id),
   );
   check(
@@ -606,7 +610,7 @@ function verifyGating(channels, everyone, introduced, mod) {
       holds(channel, everyone.id, 'deny', PermissionFlagsBits.ViewChannel),
     );
     check(
-      `${spec.name} visible to Introduced`,
+      `${spec.name} visible to ${ACCESS_ROLE}`,
       holds(channel, introduced.id, 'allow', PermissionFlagsBits.ViewChannel),
     );
     check(
@@ -756,7 +760,7 @@ async function configureOnboarding(guild, roles, channels) {
       `(#start-here default + ${communityIds.length} via prompt options)`,
   );
   console.log(
-    '  . 5 of those are gated behind Introduced and invisible to a new member',
+    `  . 5 of those are gated behind ${ACCESS_ROLE} and invisible to a new member`,
   );
 
   // Every option surfaces the same community channels, so the threshold holds

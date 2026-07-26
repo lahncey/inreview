@@ -26,8 +26,8 @@ npm run audit    # print live server state
 ## The access model
 
 `#start-here` and `#introductions` are visible to everyone. The remaining
-community channels are hidden behind an `Introduced` role, which the bot grants
-the first time you post an intro.
+community channels are hidden behind a `Member` role, which the bot grants the
+first time you post an intro.
 
 The role **grants** `ViewChannel` rather than denying `SendMessages`. An earlier
 version did the opposite — holding the role blocked you from posting again — but
@@ -39,9 +39,10 @@ the author to edit their original instead.
 
 **Role overwrites merge; they don't rank.** Discord combines every role
 overwrite that applies to a member into one allow mask and one deny mask, then
-applies deny before allow. Role hierarchy is irrelevant here. That's what makes
-`Mod: allow SendMessages` reliably beat `Introduced: deny SendMessages` — and
-it's why moderators never get caught by rules aimed at members.
+applies deny before allow. Role hierarchy is irrelevant here. In `#job-hunt`
+that is what lets `Mod: allow SendMessages` beat `@everyone: deny SendMessages`
+so moderators can post the weekly prompt in a channel nobody else can post in —
+and more generally why moderators never get caught by rules aimed at members.
 
 **Role-based, never per-member.** Discord caps permission overwrites at 500 per
 channel, so granting access by writing a per-member overwrite would quietly stop
@@ -94,7 +95,7 @@ per-member overwrite that shouldn't be there.
 
 The bot needs to run continuously. Channel permissions, gating, onboarding and
 invites all live on Discord's side and keep working regardless, but while the
-process is down nobody can earn the `Introduced` role — new members post an
+process is down nobody can earn the `Member` role — new members post an
 intro and stay locked out until it's back.
 
 Any host that runs a Node process works. Set the three environment variables in
@@ -121,7 +122,7 @@ Both maps are committed, unlike `invite-map.json`: ids are not secrets and the
 bot needs them at runtime. If a map is missing or corrupt, resolution degrades
 to name matching, which is where this started.
 
-Without the role map, renaming `Introduced` used to fail twice over — the bot
+Without the role map, renaming `Member` used to fail twice over — the bot
 would find no such role and silently grant nobody access while the heartbeat
 still reported healthy, and the next `setup.js` run would create a fresh
 duplicate and move every channel overwrite onto it, stripping access from

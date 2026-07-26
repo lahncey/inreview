@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
-// Same idea as channel-map.js, for roles. Renaming "Introduced" in Discord
+// Same idea as channel-map.js, for roles. Renaming the access role in Discord
 // used to break two things quietly: the bot would stop finding the role and
 // silently grant nobody access, and setup would create a fresh duplicate and
 // move every channel overwrite onto it — stripping access from everyone

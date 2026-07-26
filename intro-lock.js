@@ -2,16 +2,16 @@ import { Events, RESTJSONErrorCodes } from 'discord.js';
 import { resolveChannel } from './channel-map.js';
 import { resolveRole } from './role-map.js';
 
-// Post once in #introductions and you pick up the Introduced role, which
-// grants ViewChannel on the gated channels. Nothing denies the member
-// anything in #introductions, so they can always go back and edit their own
-// post. Duplicates are handled here by deleting and DMing, not by permissions.
+// Post once in #introductions and you pick up the Member role, which grants
+// ViewChannel on the gated channels. Nothing denies the member anything in
+// #introductions, so they can always go back and edit their own post.
+// Duplicates are handled here by deleting and DMing, not by permissions.
 //
 // Everything is role-based: per-member overwrites are capped at 500 per
 // channel, roles are not.
 
 const INTRO_CHANNEL = 'introductions';
-const INTRODUCED_ROLE = 'Introduced';
+const ACCESS_ROLE = 'Member';
 const MOD_ROLE = 'Mod';
 
 const DUPLICATE_DM =
@@ -103,9 +103,9 @@ function resolve(guild) {
   const channel = resolveChannel(guild, INTRO_CHANNEL);
   return {
     channel: channel?.isTextBased() ? channel : null,
-    // Also by id: a renamed Introduced role would otherwise leave the bot
+    // Also by id: a renamed access role would otherwise leave the bot
     // granting nobody access, while the heartbeat kept reporting healthy.
-    introduced: resolveRole(guild, INTRODUCED_ROLE),
+    introduced: resolveRole(guild, ACCESS_ROLE),
     mod: resolveRole(guild, MOD_ROLE),
   };
 }
@@ -127,7 +127,7 @@ async function onMessage(message, guildId) {
   if (!channel || message.channelId !== channel.id) return;
 
   if (!introduced) {
-    warn(`role "${INTRODUCED_ROLE}" not found, cannot lock. Run npm run setup.`);
+    warn(`role "${ACCESS_ROLE}" not found, cannot lock. Run npm run setup.`);
     return;
   }
 
@@ -196,7 +196,7 @@ async function decide(message, introduced, mod) {
 
   const granted = await grantRole(member, introduced, 'Posted in #introductions');
   if (granted) {
-    log(`  -> GRANT ${INTRODUCED_ROLE} to ${message.author.tag} (${member.id})`);
+    log(`  -> GRANT ${ACCESS_ROLE} to ${message.author.tag} (${member.id})`);
   }
 }
 
@@ -210,14 +210,14 @@ async function reconcile(client, guildId) {
     return;
   }
   if (!introduced) {
-    warn(`role "${INTRODUCED_ROLE}" not found, skipping reconciliation.`);
+    warn(`role "${ACCESS_ROLE}" not found, skipping reconciliation.`);
     return;
   }
 
   // Printed on every start so a misresolved channel or role is visible
   // immediately rather than showing up as silence.
   log(`watching #${channel.name} (${channel.id})`);
-  log(`marker role ${INTRODUCED_ROLE} (${introduced.id})`);
+  log(`marker role ${ACCESS_ROLE} (${introduced.id})`);
 
   const messages = await fetchRecent(channel, RECONCILE_LIMIT);
   log(`scanned ${messages.length} recent messages in #${INTRO_CHANNEL}`);
@@ -255,7 +255,7 @@ async function reconcile(client, guildId) {
       'Reconciliation: posted in #introductions',
     );
     if (ok) {
-      log(`GRANT ${INTRODUCED_ROLE} to ${member.user.tag} (${member.id}) [backfill]`);
+      log(`GRANT ${ACCESS_ROLE} to ${member.user.tag} (${member.id}) [backfill]`);
       granted += 1;
     } else {
       skipped += 1;
