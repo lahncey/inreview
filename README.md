@@ -25,15 +25,28 @@ npm run audit    # print live server state
 
 ## The access model
 
-`#start-here` and `#introductions` are visible to everyone. The remaining
-community channels are hidden behind a `Member` role, which the bot grants the
-first time you post an intro.
+Every channel except the staff one is readable by anyone who walks in. What an
+introduction buys is the ability to **participate**: the `Member` role, which
+the bot grants the first time you post in `#introductions`, is what carries
+`SendMessages`.
 
-The role **grants** `ViewChannel` rather than denying `SendMessages`. An earlier
-version did the opposite — holding the role blocked you from posting again — but
-denying sends also blocks editing, so members couldn't fix a typo in their own
-introduction. Duplicate posts are now handled by deleting the message and DMing
-the author to edit their original instead.
+This is the third version of that model, and the reasoning is worth keeping.
+
+The first denied `SendMessages` to people who already held the role, so posting
+a second intro was impossible. That also blocked *editing*, so nobody could fix
+a typo in their own introduction. Duplicate handling moved to the bot instead,
+which deletes the extra message and DMs the author.
+
+The second hid the gated channels entirely, with the role granting
+`ViewChannel`. It worked, but a visitor saw a server that looked empty, and
+`#start-here` rendered its channel links as a row of "No Access" chips —
+advertising the community by showing you the door rather than the room.
+
+Now the door is open and the microphone is what's earned. Denying `SendMessages`
+alone is not enough to do that: starting a thread and replying inside one are
+separate permissions, and either left open is a visitor posting in a channel
+they shouldn't be able to post in. All three are denied to `@everyone` and
+granted back to `Member`.
 
 ## Notes on the parts that were harder than expected
 
@@ -47,6 +60,13 @@ and more generally why moderators never get caught by rules aimed at members.
 **Role-based, never per-member.** Discord caps permission overwrites at 500 per
 channel, so granting access by writing a per-member overwrite would quietly stop
 working somewhere around the 500th member. Every grant here is a role.
+
+**Permission changes are read back.** `setup.js` re-reads every gated channel
+after writing it and asserts the intended shape — that nothing but the staff
+channel denies `ViewChannel`, that all three posting permissions are denied to
+`@everyone`, that moderators kept their voice. The checks caught the model
+change described above: they were still asserting the old shape, and said so
+line by line instead of leaving a wrong server looking like a clean run.
 
 **New roles inherit `@everyone`'s permissions.** Unless you pass `permissions`
 explicitly, Discord seeds a new role from whatever `@everyone` held at creation

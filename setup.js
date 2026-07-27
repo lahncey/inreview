@@ -181,9 +181,15 @@ const ROLE_PERMISSIONS = [];
 // access:
 //   readonly     — @everyone sees it, cannot post
 //   open         — @everyone sees it and posts in it
-//   gated        — hidden until the member holds the access role
-//   gated-notice — gated, and read-only once inside: only Mod posts
+//   gated        — @everyone reads it, only the access role posts
+//   gated-notice — @everyone reads it, only Mod posts
 //   mod          — hidden from everyone but Mod
+//
+// "gated" used to mean hidden, with the access role granting ViewChannel. It
+// now gates participation rather than visibility: the whole server is legible
+// to a visitor, and posting is what an intro buys. Nothing is hidden any more
+// except the staff channel — which is also why #start-here no longer shows a
+// row of "No Access" chips where its channel links are.
 //
 // createIn places a channel at creation time only. Categories are otherwise
 // not managed here — see createChannels.
@@ -194,9 +200,6 @@ const CHANNELS = [
   // A GuildAnnouncement channel, not plain text — the name fallback in
   // createChannels has to allow for that or it would create a duplicate.
   { name: 'announcements', access: 'readonly', createIn: 'Community' },
-  // explicitSend spells out SendMessages for the access role rather than relying on
-  // the @everyone guild grant, so this channel keeps working if that baseline
-  // is ever tightened. Threads and slowmode stay at Discord's defaults.
   // Year and area change over time. Discord already lets members re-pick their
   // onboarding answers from the Channels & Roles tab; this channel exists
   // because nobody discovers that on their own. Read-only — anything
@@ -206,7 +209,7 @@ const CHANNELS = [
     access: 'gated-notice',
     createIn: 'Start Here',
   },
-  { name: 'general', access: 'gated', explicitSend: true },
+  { name: 'general', access: 'gated' },
   // threadOnly: members read and reply inside threads, but cannot post at the
   // top level or start threads of their own. Mod (and the owner, who bypasses
   // overwrites entirely) posts the weekly prompt and opens the thread.
@@ -627,10 +630,11 @@ async function createChannels(guild) {
       continue;
     }
 
-    // Hidden channels are born hidden so there is no window in which they are
-    // briefly world-readable. applyGating fills in the rest of the overwrites
-    // for both new and pre-existing channels.
-    const bornHidden = spec.access !== 'readonly' && spec.access !== 'open';
+    // Only the staff channel is hidden now, and it is born that way so there
+    // is no window in which it is briefly world-readable. Everything else is
+    // legible to visitors by design, so it can be born open and let applyGating
+    // settle the posting rules.
+    const bornHidden = spec.access === 'mod';
 
     // Placement happens once, at birth. If the named category is gone, the
     // channel is created at the top level rather than resurrecting it.
@@ -744,45 +748,59 @@ async function applyGating(guild, roles, channels) {
     }
 
     if (spec.access === 'gated') {
-      const everyonePayload = { ViewChannel: false };
-      const modPayload = { ViewChannel: true };
+      // Readable by anyone, silent for anyone without the access role. Every
+      // route into the conversation is denied here, not just SendMessages:
+      // starting a thread and replying inside one are separate permissions,
+      // and leaving either open would let a visitor post in a channel they
+      // are not supposed to be able to post in.
+      const everyonePayload = {
+        ViewChannel: true,
+        SendMessages: false,
+        CreatePublicThreads: false,
+        CreatePrivateThreads: false,
+        SendMessagesInThreads: false,
+      };
+
+      // Mods never receive the access role, so every allow the access role
+      // gets has to be spelled out for them too — otherwise the @everyone deny
+      // above is the last word and moderators go mute.
+      const modPayload = {
+        ViewChannel: true,
+        SendMessages: true,
+        CreatePublicThreads: true,
+        SendMessagesInThreads: true,
+      };
+
+      const introducedPayload = { ViewChannel: true };
 
       if (spec.threadOnly) {
         // SendMessages governs the channel body only — replies inside a
-        // thread are governed by SendMessagesInThreads. Denying the first
-        // while allowing the second is what makes the channel thread-only.
-        Object.assign(everyonePayload, {
-          SendMessages: false,
-          CreatePublicThreads: false,
-          CreatePrivateThreads: false,
-          SendMessagesInThreads: true,
-        });
-        Object.assign(modPayload, {
+        // thread are governed by SendMessagesInThreads. Members get the
+        // second and not the first, so Mod still opens every thread.
+        introducedPayload.SendMessagesInThreads = true;
+      } else {
+        Object.assign(introducedPayload, {
           SendMessages: true,
           CreatePublicThreads: true,
+          SendMessagesInThreads: true,
         });
       }
-
-      const introducedPayload = { ViewChannel: true };
-      if (spec.explicitSend) introducedPayload.SendMessages = true;
 
       await channel.permissionOverwrites.edit(everyone, everyonePayload, {
         reason: REASON,
       });
-      // The @everyone allow of SendMessagesInThreads survives here because
-      // role overwrites merge rather than replace.
       await channel.permissionOverwrites.edit(introduced, introducedPayload, {
         reason: REASON,
       });
-      // Mods never receive the access role, so without this they would be shut
-      // out of every community channel on the server.
       await channel.permissionOverwrites.edit(mod, modPayload, {
         reason: REASON,
       });
 
       add(
-        `#${spec.name}: hidden, visible to ${ACCESS_ROLE} and Mod` +
-          (spec.threadOnly ? ' — thread-only posting' : ''),
+        `#${spec.name}: everyone reads` +
+          (spec.threadOnly
+            ? `, ${ACCESS_ROLE} replies in threads, Mod opens them`
+            : `, ${ACCESS_ROLE} and Mod post`),
       );
 
       if (spec.autoArchive && channel.defaultAutoArchiveDuration !== spec.autoArchive) {
@@ -795,20 +813,25 @@ async function applyGating(guild, roles, channels) {
       }
     }
 
-    // Gated, then read-only inside: members can see it once they hold the
-    // access role, but only Mod posts. Threads are closed so replies cannot
+    // Readable by anyone and read-only for everyone but Mod — the access role
+    // buys nothing here, deliberately. Threads are closed so replies cannot
     // sneak in around the SendMessages deny.
     if (spec.access === 'gated-notice') {
       await channel.permissionOverwrites.edit(
         everyone,
         {
-          ViewChannel: false,
+          ViewChannel: true,
+          SendMessages: false,
           CreatePublicThreads: false,
           CreatePrivateThreads: false,
           SendMessagesInThreads: false,
         },
         { reason: REASON },
       );
+      // Kept explicit rather than deleted. The role grants nothing extra, and
+      // an overwrite that says so is easier to read in Discord's UI than an
+      // absence — this channel being read-only for members is a decision, not
+      // an oversight.
       await channel.permissionOverwrites.edit(
         introduced,
         { ViewChannel: true, SendMessages: false },
@@ -819,7 +842,7 @@ async function applyGating(guild, roles, channels) {
         { ViewChannel: true, SendMessages: true },
         { reason: REASON },
       );
-      add(`#${spec.name}: hidden, read-only for ${ACCESS_ROLE}, Mod posts`);
+      add(`#${spec.name}: everyone reads, Mod posts`);
     }
 
     if (spec.access === 'mod') {
@@ -862,41 +885,55 @@ function verifyGating(channels, everyone, introduced, mod) {
     !holds(intro, everyone.id, 'deny', PermissionFlagsBits.SendMessages),
   );
 
+  // The property the whole model now rests on: nothing except the staff
+  // channel is hidden, so #start-here can link every channel without a
+  // visitor seeing a "No Access" chip where the link should be.
+  for (const spec of CHANNELS.filter((c) => c.access !== 'mod')) {
+    const channel = channels.get(spec.name);
+    if (!channel) continue;
+    check(
+      `${spec.name} readable by @everyone`,
+      !holds(channel, everyone.id, 'deny', PermissionFlagsBits.ViewChannel),
+    );
+  }
+
   for (const spec of CHANNELS.filter((c) => c.access === 'gated')) {
     const channel = channels.get(spec.name);
-    check(
-      `${spec.name} hidden from @everyone`,
-      holds(channel, everyone.id, 'deny', PermissionFlagsBits.ViewChannel),
-    );
-    check(
-      `${spec.name} visible to ${ACCESS_ROLE}`,
-      holds(channel, introduced.id, 'allow', PermissionFlagsBits.ViewChannel),
-    );
-    check(
-      `${spec.name} visible to Mod`,
-      holds(channel, mod.id, 'allow', PermissionFlagsBits.ViewChannel),
-    );
 
-    if (!spec.threadOnly) continue;
-
+    // Every way into the conversation, not just SendMessages. Threads are the
+    // hole worth testing for: they are three separate permissions, and one of
+    // them left open is a visitor posting in a members-only channel.
     check(
-      `${spec.name} @everyone cannot post at top level`,
+      `${spec.name} @everyone cannot post`,
       holds(channel, everyone.id, 'deny', PermissionFlagsBits.SendMessages),
     );
     check(
-      `${spec.name} @everyone cannot start threads`,
+      `${spec.name} @everyone cannot use threads`,
       holds(channel, everyone.id, 'deny', PermissionFlagsBits.CreatePublicThreads) &&
-        holds(channel, everyone.id, 'deny', PermissionFlagsBits.CreatePrivateThreads),
+        holds(channel, everyone.id, 'deny', PermissionFlagsBits.CreatePrivateThreads) &&
+        holds(channel, everyone.id, 'deny', PermissionFlagsBits.SendMessagesInThreads),
     );
     check(
-      `${spec.name} @everyone may reply in threads`,
-      holds(channel, everyone.id, 'allow', PermissionFlagsBits.SendMessagesInThreads),
+      `${spec.name} Mod may post`,
+      holds(channel, mod.id, 'allow', PermissionFlagsBits.SendMessages),
     );
-    check(
-      `${spec.name} Mod may post and open threads`,
-      holds(channel, mod.id, 'allow', PermissionFlagsBits.SendMessages) &&
+
+    if (spec.threadOnly) {
+      check(
+        `${spec.name} ${ACCESS_ROLE} replies in threads but not at top level`,
+        holds(channel, introduced.id, 'allow', PermissionFlagsBits.SendMessagesInThreads) &&
+          !holds(channel, introduced.id, 'allow', PermissionFlagsBits.SendMessages),
+      );
+      check(
+        `${spec.name} Mod may open threads`,
         holds(channel, mod.id, 'allow', PermissionFlagsBits.CreatePublicThreads),
-    );
+      );
+    } else {
+      check(
+        `${spec.name} ${ACCESS_ROLE} may post`,
+        holds(channel, introduced.id, 'allow', PermissionFlagsBits.SendMessages),
+      );
+    }
   }
 
   for (const spec of CHANNELS.filter((c) => c.access === 'gated-notice')) {
@@ -904,15 +941,11 @@ function verifyGating(channels, everyone, introduced, mod) {
     if (!channel) continue;
 
     check(
-      `${spec.name} hidden from @everyone`,
-      holds(channel, everyone.id, 'deny', PermissionFlagsBits.ViewChannel),
+      `${spec.name} @everyone cannot post`,
+      holds(channel, everyone.id, 'deny', PermissionFlagsBits.SendMessages),
     );
     check(
-      `${spec.name} visible to ${ACCESS_ROLE}`,
-      holds(channel, introduced.id, 'allow', PermissionFlagsBits.ViewChannel),
-    );
-    check(
-      `${spec.name} ${ACCESS_ROLE} cannot post`,
+      `${spec.name} ${ACCESS_ROLE} cannot post either`,
       holds(channel, introduced.id, 'deny', PermissionFlagsBits.SendMessages),
     );
     check(
