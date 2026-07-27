@@ -30,6 +30,8 @@ const ORDER = [
   'roles-and-referrals',
   'resume-and-portfolio',
   'wins',
+  'rules',
+  'announcements',
   'resources',
   'mod-updates',
 ];

@@ -88,6 +88,10 @@ const ROLE_PERMISSIONS = [];
 const CHANNELS = [
   { name: 'start-here', access: 'readonly' },
   { name: 'introductions', access: 'open' },
+  { name: 'rules', access: 'readonly', createIn: 'Start Here' },
+  // A GuildAnnouncement channel, not plain text — the name fallback in
+  // createChannels has to allow for that or it would create a duplicate.
+  { name: 'announcements', access: 'readonly', createIn: 'Community' },
   // explicitSend spells out SendMessages for the access role rather than relying on
   // the @everyone guild grant, so this channel keeps working if that baseline
   // is ever tightened. Threads and slowmode stay at Discord's defaults.
@@ -381,7 +385,10 @@ async function createChannels(guild) {
     const existing =
       mapped ??
       guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && c.name === spec.name,
+        (c) =>
+          (c.type === ChannelType.GuildText ||
+            c.type === ChannelType.GuildAnnouncement) &&
+          c.name === spec.name,
       );
 
     if (existing) {
