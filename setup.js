@@ -38,21 +38,89 @@ const SPECIAL_ROLES = ['Mod', 'Professional'];
 // badge stays a manual grant, so seeing it means a human actually checked.
 const PENDING_PROFESSIONAL = 'Professional (Unverified)';
 const COHORT_ROLES = [
-  'Freshman/Sophomore',
+  'Freshman',
+  'Sophomore',
   'Junior',
-  'Graduating This Year',
-  'Recent Grad',
-  'Career Switcher',
+  'Senior',
+  'Recently Graduated',
+  'Professional in Career Transition',
 ];
+
+// Used verbatim as both the option label and the role name. Order here is the
+// role hierarchy order, not the order members see — see AREA_PROMPTS.
 const FUNCTION_ROLES = [
   'Product',
-  'Ops',
-  'Analytics',
-  'Marketing',
+  'Software Engineering',
+  'Data & Analytics',
+  'Design / UX',
   'Consulting',
+  'Strategy / BizOps',
   'Finance',
+  'Accounting',
+  'Marketing',
+  'Sales',
+  'GTM / Growth',
+  'Operations',
+  'IT / Cybersecurity',
+  'HR / People Ops',
+  'Real Estate',
+  'Startups',
   'Still Figuring It Out',
 ];
+
+// Discord caps options per onboarding prompt: 12 is accepted, 14 comes back
+// TOO_MANY_ONBOARDING_OPTIONS. Seventeen areas do not fit in one prompt, so
+// they are split across two rather than dropping any.
+//
+// The first carries the common disciplines and the "Still Figuring It Out"
+// escape hatch, and is required. The second is a catch-all and is optional —
+// forcing a second pick would mean someone in Product having to claim an
+// unrelated area to get through onboarding.
+const AREA_PROMPTS = [
+  {
+    title: 'What area are you in, or aiming for?',
+    required: true,
+    options: [
+      'Product',
+      'Software Engineering',
+      'Data & Analytics',
+      'Design / UX',
+      'Consulting',
+      'Strategy / BizOps',
+      'Finance',
+      'Accounting',
+      'Marketing',
+      'Sales',
+      'Operations',
+      'Still Figuring It Out',
+    ],
+  },
+  {
+    title: 'Any of these too? (optional)',
+    required: false,
+    options: [
+      'GTM / Growth',
+      'IT / Cybersecurity',
+      'HR / People Ops',
+      'Real Estate',
+      'Startups',
+    ],
+  },
+];
+
+// Catch a role added to FUNCTION_ROLES but never surfaced to anyone, or a
+// typo that would silently drop an option.
+const PROMPTED_AREAS = AREA_PROMPTS.flatMap((p) => p.options);
+for (const name of FUNCTION_ROLES) {
+  if (!PROMPTED_AREAS.includes(name)) {
+    throw new Error(`FUNCTION_ROLES has "${name}" but no onboarding prompt offers it`);
+  }
+}
+for (const name of PROMPTED_AREAS) {
+  if (!FUNCTION_ROLES.includes(name)) {
+    throw new Error(`AREA_PROMPTS offers "${name}" but it is not a function role`);
+  }
+}
 // The access key: holding it grants ViewChannel on the gated channels. It
 // grants access rather than removing it, so it never blocks editing.
 // Named once here — renaming it in Discord is safe either way, since
@@ -154,14 +222,20 @@ const INVITE_LABELS = [
 ];
 
 // Onboarding prompt 1: option label -> role name.
+//
+// The last two both describe working professionals, so the labels have to do
+// the disambiguating: one is here job hunting, the other is here to help. A
+// bare "Professional" would get picked by both and the distinction would be
+// lost — which matters, because only the second is a mentoring signal.
 const STAGE_OPTIONS = [
-  ['Still in my first two years', 'Freshman/Sophomore'],
-  ['Junior year', 'Junior'],
-  ['Graduating this year', 'Graduating This Year'],
-  ['Recently graduated', 'Recent Grad'],
-  ['Working, looking to switch into business or tech', 'Career Switcher'],
+  ['Freshman', 'Freshman'],
+  ['Sophomore', 'Sophomore'],
+  ['Junior', 'Junior'],
+  ['Senior', 'Senior'],
+  ['Recently graduated', 'Recently Graduated'],
+  ['Professional — changing careers', 'Professional in Career Transition'],
   // Unverified on purpose — the hoisted Professional badge is granted by hand.
-  ['I work in the field and want to help', PENDING_PROFESSIONAL],
+  ['Professional — here to help others', PENDING_PROFESSIONAL],
 ];
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -326,17 +400,20 @@ async function orderRoles(guild, roles, me) {
   // roles one at a time works, so do that. Discord shifts the rest as each one
   // lands, which is why most iterations find nothing to do.
   let moved = 0;
+  await guild.roles.fetch();
   for (let i = 0; i < ROLE_ORDER.length; i += 1) {
     const role = roles.get(ROLE_ORDER[i]);
     if (!role) continue;
 
     const wanted = Math.max(1, top - i);
-    await guild.roles.fetch();
     if (guild.roles.cache.get(role.id)?.position === wanted) continue;
 
     try {
       await role.setPosition(wanted, { reason: REASON });
       moved += 1;
+      // Positions shift as each move lands, so re-read before the next check.
+      // Only after an actual move — re-fetching every iteration is wasted work.
+      await guild.roles.fetch();
     } catch (err) {
       warn(`could not move "${role.name}": ${err?.message ?? err}`);
     }
@@ -848,20 +925,20 @@ async function configureOnboarding(guild, roles, channels) {
           channel_ids: communityIds,
         })),
       },
-      {
-        id: '1',
+      ...AREA_PROMPTS.map((prompt, index) => ({
+        id: String(index + 1),
         type: 0, // MULTIPLE_CHOICE
-        title: 'What area are you in, or aiming for?',
+        title: prompt.title,
         single_select: false,
-        required: true,
+        required: prompt.required,
         in_onboarding: true,
-        options: FUNCTION_ROLES.map((name, i) => ({
+        options: prompt.options.map((name, i) => ({
           id: String(i),
           title: name,
           role_ids: [roleId(name)],
           channel_ids: communityIds,
         })),
-      },
+      })),
     ],
   };
 
