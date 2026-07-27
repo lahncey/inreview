@@ -26,6 +26,18 @@ const DM_BLOCKED_CODES = new Set([
   RESTJSONErrorCodes.CannotSendMessagesToThisUserDueToHavingNoMutualGuilds,
 ]);
 
+// The owner and Mods are skipped, which leaves nobody able to test the grant
+// path from an account they actually control — the reason a second account was
+// needed at all. Setting INTRO_TEST_USER_ID to your own id waives those two
+// skips for that one person, so posting in #introductions runs the real
+// handler: real fetch, real grant, real duplicate deletion, real DM.
+//
+// Deliberately env-gated rather than a constant: it is unset on the host, so
+// production behaviour is unchanged and there is no flag to remember to flip
+// back. Bots and system messages are still skipped — those two would break
+// assumptions further down rather than test them.
+const TEST_USER_ID = process.env.INTRO_TEST_USER_ID ?? null;
+
 // How far back to look on startup, to catch posts made while offline.
 const RECONCILE_LIMIT = 200;
 const PAGE_SIZE = 100;
@@ -115,6 +127,11 @@ function resolve(guild) {
 function skipReason(message, member, modRole) {
   if (message.author.bot) return 'bot';
   if (message.system) return 'system message';
+
+  // Waived only for the one id named in the environment, and only for the two
+  // role-based skips below it.
+  if (TEST_USER_ID && message.author.id === TEST_USER_ID) return null;
+
   if (message.guild.ownerId === message.author.id) return 'server owner';
   if (modRole && member.roles.cache.has(modRole.id)) return 'has Mod';
   return null;
@@ -218,6 +235,16 @@ async function reconcile(client, guildId) {
   // immediately rather than showing up as silence.
   log(`watching #${channel.name} (${channel.id})`);
   log(`marker role ${ACCESS_ROLE} (${introduced.id})`);
+
+  // Loud on purpose. Left set on a host this would quietly treat a moderator
+  // as an ordinary member, and the symptom — their intro getting deleted —
+  // would look like a bug rather than a leftover setting.
+  if (TEST_USER_ID) {
+    warn(
+      `INTRO_TEST_USER_ID is set to ${TEST_USER_ID} — that account is treated ` +
+        'as an ordinary member. Unset it outside local testing.',
+    );
+  }
 
   const messages = await fetchRecent(channel, RECONCILE_LIMIT);
   log(`scanned ${messages.length} recent messages in #${INTRO_CHANNEL}`);
