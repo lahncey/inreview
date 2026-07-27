@@ -77,10 +77,14 @@ const ROLE_ORDER = [
 const ROLE_PERMISSIONS = [];
 
 // access:
-//   readonly — @everyone sees it, cannot post
-//   open     — @everyone sees it and posts in it
-//   gated    — hidden until the member holds the access role
-//   mod      — hidden from everyone but Mod
+//   readonly     — @everyone sees it, cannot post
+//   open         — @everyone sees it and posts in it
+//   gated        — hidden until the member holds the access role
+//   gated-notice — gated, and read-only once inside: only Mod posts
+//   mod          — hidden from everyone but Mod
+//
+// createIn places a channel at creation time only. Categories are otherwise
+// not managed here — see createChannels.
 const CHANNELS = [
   { name: 'start-here', access: 'readonly' },
   { name: 'introductions', access: 'open' },
@@ -108,6 +112,11 @@ const CHANNELS = [
   { name: 'roles-and-referrals', access: 'gated' },
   { name: 'resume-and-portfolio', access: 'gated' },
   { name: 'wins', access: 'gated' },
+  {
+    name: 'resources',
+    access: 'gated-notice',
+    createIn: 'The Job Hunt',
+  },
   { name: 'mod-updates', access: 'mod' },
 ];
 
@@ -182,7 +191,6 @@ async function run() {
   await reconcileRolePermissions(guild, roles);
   await orderRoles(guild, roles, me);
   const channels = await createChannels(guild);
-  await orderChannels(guild, channels);
   await lockDownEveryone(guild);
   await applyGating(guild, roles, channels);
   await clearSlowmode(channels);
@@ -350,26 +358,18 @@ function printOrder(roles) {
   });
 }
 
+// Categories are not managed here. The server gets reorganised by hand, and a
+// script that moved channels back would just fight whoever did the organising.
+// This owns permissions, gating and slowmode; where a channel lives, and the
+// order it sits in, belong to Discord's UI.
+//
+// createIn is the one exception, and only for a channel that does not exist
+// yet: it decides where the channel is born, and is never consulted again.
 async function createChannels(guild) {
-  step('Category and channels');
+  step('Channels');
   await guild.channels.fetch();
   const everyoneId = guild.roles.everyone.id;
   const result = new Map();
-
-  let category = guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildCategory && c.name === 'In Review',
-  );
-  if (category) {
-    same('category "In Review"');
-  } else {
-    category = await guild.channels.create({
-      name: 'In Review',
-      type: ChannelType.GuildCategory,
-      reason: REASON,
-    });
-    add('category "In Review"');
-  }
-
   const map = readChannelMap();
 
   for (const spec of CHANNELS) {
@@ -399,76 +399,39 @@ async function createChannels(guild) {
     // Hidden channels are born hidden so there is no window in which they are
     // briefly world-readable. applyGating fills in the rest of the overwrites
     // for both new and pre-existing channels.
-    const bornHidden = spec.access === 'gated' || spec.access === 'mod';
+    const bornHidden = spec.access !== 'readonly' && spec.access !== 'open';
+
+    // Placement happens once, at birth. If the named category is gone, the
+    // channel is created at the top level rather than resurrecting it.
+    const parent = spec.createIn
+      ? guild.channels.cache.find(
+          (c) => c.type === ChannelType.GuildCategory && c.name === spec.createIn,
+        )
+      : null;
+    if (spec.createIn && !parent) {
+      warn(`category "${spec.createIn}" not found — creating #${spec.name} at top level`);
+    }
 
     const channel = await guild.channels.create({
       name: spec.name,
       type: ChannelType.GuildText,
-      parent: category.id,
+      ...(parent ? { parent: parent.id } : {}),
       permissionOverwrites: bornHidden
         ? [{ id: everyoneId, deny: [PermissionFlagsBits.ViewChannel] }]
         : [],
       reason: REASON,
     });
 
-    add(`#${spec.name} (${spec.access})`);
+    add(
+      `#${spec.name} (${spec.access})` +
+        (parent ? ` in "${parent.name}"` : ' at top level'),
+    );
     result.set(spec.name, channel);
     map[spec.name] = channel.id;
   }
 
   writeChannelMap(map);
-
-  // Anything in the category that is neither a known name nor a mapped id is
-  // genuinely unmanaged — a channel somebody added by hand, not a rename.
-  const managedNames = new Set(CHANNELS.map((c) => c.name));
-  const managedIds = new Set(Object.values(map));
-  for (const channel of guild.channels.cache.values()) {
-    if (channel.parentId !== category.id) continue;
-    if (channel.type !== ChannelType.GuildText) continue;
-    if (managedNames.has(channel.name) || managedIds.has(channel.id)) continue;
-    warn(`#${channel.name} sits in the category but is not managed by setup`);
-    warn('  add it to CHANNELS if it should be');
-  }
-
   return result;
-}
-
-// Discord positions channels by creation order, so anything added later lands
-// at the bottom no matter where it sits in CHANNELS. This makes the array the
-// source of truth for ordering instead.
-async function orderChannels(guild, channels) {
-  step('Channel order');
-
-  const wanted = CHANNELS.map((spec, index) => ({
-    channel: channels.get(spec.name),
-    position: index,
-    name: spec.name,
-  })).filter((entry) => entry.channel);
-
-  const misplaced = wanted.filter((e) => e.channel.position !== e.position);
-  if (!misplaced.length) {
-    same('channel order');
-    return;
-  }
-
-  try {
-    await guild.channels.setPositions(
-      wanted.map((e) => ({ channel: e.channel.id, position: e.position })),
-    );
-    add(`reordered ${misplaced.length} channel(s) to match CHANNELS`);
-  } catch (err) {
-    warn(`Could not set channel positions: ${err?.message ?? err}`);
-    warn('Drag them into order manually in Discord.');
-  }
-
-  await guild.channels.fetch();
-  const category = guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildCategory && c.name === 'In Review',
-  );
-  const actual = [...guild.channels.cache.values()]
-    .filter((c) => c.parentId === category?.id && c.type === ChannelType.GuildText)
-    .sort((a, b) => a.position - b.position);
-  actual.forEach((c, i) => console.log(`    ${String(i + 1).padStart(2)}. #${c.name}`));
 }
 
 async function lockDownEveryone(guild) {
@@ -601,6 +564,33 @@ async function applyGating(guild, roles, channels) {
       }
     }
 
+    // Gated, then read-only inside: members can see it once they hold the
+    // access role, but only Mod posts. Threads are closed so replies cannot
+    // sneak in around the SendMessages deny.
+    if (spec.access === 'gated-notice') {
+      await channel.permissionOverwrites.edit(
+        everyone,
+        {
+          ViewChannel: false,
+          CreatePublicThreads: false,
+          CreatePrivateThreads: false,
+          SendMessagesInThreads: false,
+        },
+        { reason: REASON },
+      );
+      await channel.permissionOverwrites.edit(
+        introduced,
+        { ViewChannel: true, SendMessages: false },
+        { reason: REASON },
+      );
+      await channel.permissionOverwrites.edit(
+        mod,
+        { ViewChannel: true, SendMessages: true },
+        { reason: REASON },
+      );
+      add(`#${spec.name}: hidden, read-only for ${ACCESS_ROLE}, Mod posts`);
+    }
+
     if (spec.access === 'mod') {
       await channel.permissionOverwrites.edit(
         everyone,
@@ -675,6 +665,35 @@ function verifyGating(channels, everyone, introduced, mod) {
       `${spec.name} Mod may post and open threads`,
       holds(channel, mod.id, 'allow', PermissionFlagsBits.SendMessages) &&
         holds(channel, mod.id, 'allow', PermissionFlagsBits.CreatePublicThreads),
+    );
+  }
+
+  for (const spec of CHANNELS.filter((c) => c.access === 'gated-notice')) {
+    const channel = channels.get(spec.name);
+    if (!channel) continue;
+
+    check(
+      `${spec.name} hidden from @everyone`,
+      holds(channel, everyone.id, 'deny', PermissionFlagsBits.ViewChannel),
+    );
+    check(
+      `${spec.name} visible to ${ACCESS_ROLE}`,
+      holds(channel, introduced.id, 'allow', PermissionFlagsBits.ViewChannel),
+    );
+    check(
+      `${spec.name} ${ACCESS_ROLE} cannot post`,
+      holds(channel, introduced.id, 'deny', PermissionFlagsBits.SendMessages),
+    );
+    check(
+      `${spec.name} Mod may post`,
+      holds(channel, mod.id, 'allow', PermissionFlagsBits.ViewChannel) &&
+        holds(channel, mod.id, 'allow', PermissionFlagsBits.SendMessages),
+    );
+    check(
+      `${spec.name} threads closed`,
+      holds(channel, everyone.id, 'deny', PermissionFlagsBits.CreatePublicThreads) &&
+        holds(channel, everyone.id, 'deny', PermissionFlagsBits.CreatePrivateThreads) &&
+        holds(channel, everyone.id, 'deny', PermissionFlagsBits.SendMessagesInThreads),
     );
   }
 
