@@ -313,6 +313,7 @@ async function run() {
   await reconcileRolePermissions(guild, roles);
   await orderRoles(guild, roles, me);
   await assignFounder(guild, roles);
+  await hideBotRole(me);
   const channels = await createChannels(guild);
   await lockDownEveryone(guild);
   await applyGating(guild, roles, channels);
@@ -367,6 +368,38 @@ async function createRoles(guild) {
 
   writeRoleMap(map);
   return created;
+}
+
+// The bot's own role has to sit above every role it manages, and that same
+// position decides where its heading lands in the member list — right at the
+// top, above the owner. Moving it down is not an option: below Founder it
+// could no longer grant Founder, and below Member the intro grant stops
+// working entirely. Un-hoisting gets the same result for free — the app drops
+// into the ungrouped Online list at the bottom while the hierarchy is
+// untouched.
+async function hideBotRole(me) {
+  step('Bot role');
+
+  const role = me.roles.highest;
+  if (!role.hoist) {
+    same(`"${role.name}" is not shown as its own group`);
+    return;
+  }
+
+  // Expected to fail: a role has to sit strictly below the bot's highest to be
+  // editable by it, and this is that highest role. Nothing can fix that from
+  // here, so the fallback is the two-click version rather than a dead end.
+  try {
+    await role.setHoist(false, REASON);
+    add(`"${role.name}": no longer its own sidebar group (position unchanged)`);
+  } catch (err) {
+    warn(`could not un-hoist "${role.name}": ${err?.message ?? err}`);
+    console.log(
+      '    Expected — a bot cannot edit its own highest role. Do it by hand:\n' +
+        `    Server Settings -> Roles -> ${role.name} -> turn off "Display role\n` +
+        '    members separately from online members". Leave its position alone.',
+    );
+  }
 }
 
 // Adding a role to the guild owner does work — hierarchy is checked against the
