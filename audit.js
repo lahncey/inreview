@@ -25,6 +25,7 @@ const ORDER = [
   'start-here',
   'introductions',
   'general',
+  'update-your-roles',
   'job-hunt',
   'ask-anything',
   'roles-and-referrals',

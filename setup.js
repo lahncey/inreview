@@ -163,6 +163,11 @@ const CHANNELS = [
   // explicitSend spells out SendMessages for the access role rather than relying on
   // the @everyone guild grant, so this channel keeps working if that baseline
   // is ever tightened. Threads and slowmode stay at Discord's defaults.
+  // Year and area change over time. Discord already lets members re-pick their
+  // onboarding answers from the Channels & Roles tab; this channel exists
+  // because nobody discovers that on their own. Members can post so they can
+  // ask if self-service does not cover their case.
+  { name: 'update-your-roles', access: 'gated', createIn: 'Start Here' },
   { name: 'general', access: 'gated', explicitSend: true },
   // threadOnly: members read and reply inside threads, but cannot post at the
   // top level or start threads of their own. Mod (and the owner, who bypasses
