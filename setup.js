@@ -759,6 +759,7 @@ async function applyGating(guild, roles, channels) {
         CreatePublicThreads: false,
         CreatePrivateThreads: false,
         SendMessagesInThreads: false,
+        AddReactions: false,
       };
 
       // Mods never receive the access role, so every allow the access role
@@ -769,9 +770,13 @@ async function applyGating(guild, roles, channels) {
         SendMessages: true,
         CreatePublicThreads: true,
         SendMessagesInThreads: true,
+        AddReactions: true,
       };
 
-      const introducedPayload = { ViewChannel: true };
+      // Reacting is participation too — a visitor reads, a member responds.
+      // Granted even in the thread-only channel, where it is the one thing a
+      // member can do to the weekly prompt itself rather than to a reply.
+      const introducedPayload = { ViewChannel: true, AddReactions: true };
 
       if (spec.threadOnly) {
         // SendMessages governs the channel body only — replies inside a
@@ -825,21 +830,21 @@ async function applyGating(guild, roles, channels) {
           CreatePublicThreads: false,
           CreatePrivateThreads: false,
           SendMessagesInThreads: false,
+          AddReactions: false,
         },
         { reason: REASON },
       );
-      // Kept explicit rather than deleted. The role grants nothing extra, and
-      // an overwrite that says so is easier to read in Discord's UI than an
-      // absence — this channel being read-only for members is a decision, not
-      // an oversight.
+      // Still read-only, still no posting — but a member may react. It is the
+      // only signal available in a channel nobody writes in, and keeping it
+      // for members holds the same line as everywhere else.
       await channel.permissionOverwrites.edit(
         introduced,
-        { ViewChannel: true, SendMessages: false },
+        { ViewChannel: true, SendMessages: false, AddReactions: true },
         { reason: REASON },
       );
       await channel.permissionOverwrites.edit(
         mod,
-        { ViewChannel: true, SendMessages: true },
+        { ViewChannel: true, SendMessages: true, AddReactions: true },
         { reason: REASON },
       );
       add(`#${spec.name}: everyone reads, Mod posts`);
@@ -917,6 +922,11 @@ function verifyGating(channels, everyone, introduced, mod) {
       `${spec.name} Mod may post`,
       holds(channel, mod.id, 'allow', PermissionFlagsBits.SendMessages),
     );
+    check(
+      `${spec.name} only ${ACCESS_ROLE} may react`,
+      holds(channel, everyone.id, 'deny', PermissionFlagsBits.AddReactions) &&
+        holds(channel, introduced.id, 'allow', PermissionFlagsBits.AddReactions),
+    );
 
     if (spec.threadOnly) {
       check(
@@ -947,6 +957,11 @@ function verifyGating(channels, everyone, introduced, mod) {
     check(
       `${spec.name} ${ACCESS_ROLE} cannot post either`,
       holds(channel, introduced.id, 'deny', PermissionFlagsBits.SendMessages),
+    );
+    check(
+      `${spec.name} only ${ACCESS_ROLE} may react`,
+      holds(channel, everyone.id, 'deny', PermissionFlagsBits.AddReactions) &&
+        holds(channel, introduced.id, 'allow', PermissionFlagsBits.AddReactions),
     );
     check(
       `${spec.name} Mod may post`,
