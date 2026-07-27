@@ -165,9 +165,13 @@ const CHANNELS = [
   // is ever tightened. Threads and slowmode stay at Discord's defaults.
   // Year and area change over time. Discord already lets members re-pick their
   // onboarding answers from the Channels & Roles tab; this channel exists
-  // because nobody discovers that on their own. Members can post so they can
-  // ask if self-service does not cover their case.
-  { name: 'update-your-roles', access: 'gated', createIn: 'Start Here' },
+  // because nobody discovers that on their own. Read-only — anything
+  // self-service does not cover goes to the owner directly, not into a channel.
+  {
+    name: 'update-your-roles',
+    access: 'gated-notice',
+    createIn: 'Start Here',
+  },
   { name: 'general', access: 'gated', explicitSend: true },
   // threadOnly: members read and reply inside threads, but cannot post at the
   // top level or start threads of their own. Mod (and the owner, who bypasses
@@ -909,6 +913,45 @@ async function configureOnboarding(guild, roles, channels) {
     `  . 5 of those are gated behind ${ACCESS_ROLE} and invisible to a new member`,
   );
 
+  // Discord keys a member's recorded onboarding answers to prompt and option
+  // ids. Sending placeholder ids makes it mint fresh ones on every run, which
+  // orphans those answers — an option a member already picked then shows up
+  // unselected in Channels & Roles, so removing it takes two clicks: one to
+  // re-select, one to clear. Passing the existing ids back keeps them stable.
+  let current = null;
+  try {
+    current = await client.rest.get(`/guilds/${guild.id}/onboarding`);
+  } catch {
+    /* first run, nothing to preserve */
+  }
+
+  let placeholder = 0;
+  let reused = 0;
+  let minted = 0;
+
+  const promptId = (title) => {
+    const found = current?.prompts?.find((p) => p.title === title);
+    if (found) {
+      reused += 1;
+      return found.id;
+    }
+    minted += 1;
+    return `new-${placeholder++}`;
+  };
+
+  const optionId = (promptTitle, optionTitle) => {
+    const prompt = current?.prompts?.find((p) => p.title === promptTitle);
+    const found = prompt?.options?.find((o) => o.title === optionTitle);
+    if (found) {
+      reused += 1;
+      return found.id;
+    }
+    minted += 1;
+    return `new-${placeholder++}`;
+  };
+
+  const STAGE_TITLE = 'Where are you right now?';
+
   // Every option surfaces the same community channels, so the threshold holds
   // no matter which option a member picks.
   const body = {
@@ -917,28 +960,28 @@ async function configureOnboarding(guild, roles, channels) {
     default_channel_ids: [startHereId],
     prompts: [
       {
-        id: '0',
+        id: promptId(STAGE_TITLE),
         type: 0, // MULTIPLE_CHOICE
-        title: 'Where are you right now?',
+        title: STAGE_TITLE,
         single_select: true,
         required: true,
         in_onboarding: true,
-        options: STAGE_OPTIONS.map(([title, role], i) => ({
-          id: String(i),
+        options: STAGE_OPTIONS.map(([title, role]) => ({
+          id: optionId(STAGE_TITLE, title),
           title,
           role_ids: [roleId(role)],
           channel_ids: communityIds,
         })),
       },
-      ...AREA_PROMPTS.map((prompt, index) => ({
-        id: String(index + 1),
+      ...AREA_PROMPTS.map((prompt) => ({
+        id: promptId(prompt.title),
         type: 0, // MULTIPLE_CHOICE
         title: prompt.title,
         single_select: false,
         required: prompt.required,
         in_onboarding: true,
-        options: prompt.options.map((name, i) => ({
-          id: String(i),
+        options: prompt.options.map((name) => ({
+          id: optionId(prompt.title, name),
           title: name,
           role_ids: [roleId(name)],
           channel_ids: communityIds,
@@ -952,7 +995,11 @@ async function configureOnboarding(guild, roles, channels) {
       body,
       reason: REASON,
     });
-    add('onboarding enabled with 2 required prompts (advanced mode)');
+    add('onboarding enabled (advanced mode)');
+    console.log(
+      `  . ids: ${reused} preserved, ${minted} newly minted` +
+        (minted === 0 ? ' — members keep their recorded answers' : ''),
+    );
     console.log(`  . enabled          = ${res?.enabled}`);
     console.log(`  . below_requirements = ${res?.below_requirements}`);
     if (res?.below_requirements) {
