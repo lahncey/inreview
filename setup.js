@@ -29,13 +29,14 @@ const warn = (msg) => console.log(`  ! ${msg}`);
 const step = (msg) => console.log(`\n== ${msg}`);
 
 // Top of the list first. Position is applied after all roles exist.
-// SPECIAL_ROLES is also what drives hoisting, so anything added here shows as
-// its own group in the member list.
-const SPECIAL_ROLES = ['Mod', 'Professional'];
+// Founder is the owner's badge. Nothing is gated on it — the owner bypasses
+// every overwrite anyway — it exists to label who runs the place.
+const SPECIAL_ROLES = ['Founder', 'Mod', 'Professional'];
 
-// Onboarding hands this out when someone says they work in the field. It is
-// deliberately not hoisted and not in SPECIAL_ROLES: the visible Professional
-// badge stays a manual grant, so seeing it means a human actually checked.
+// Onboarding hands this out when someone says they work in the field. The
+// visible Professional badge stays a manual grant, so seeing it means a human
+// actually checked; this one is separated by colour rather than by being
+// hidden — a washed-out version of Professional's teal.
 const PENDING_PROFESSIONAL = 'Professional (Unverified)';
 const COHORT_ROLES = [
   'Freshman',
@@ -136,6 +137,39 @@ const ROLE_ORDER = [
   ...FUNCTION_ROLES,
   ...UTILITY_ROLES,
 ];
+
+// Colour and sidebar grouping. Anything listed here is applied on creation and
+// re-applied on every run; anything absent gets Discord's default grey and no
+// group of its own — which is every area role except the catch-all, since
+// seventeen more sidebar headings would bury the list.
+//
+// Two things worth knowing before adding to this:
+//
+// A member's name shows under their HIGHEST hoisted role, not all of them. The
+// stage prompt is required and single-select, so everyone lands in exactly one
+// of the seven groups below Founder/Mod/Professional. "Still Figuring It Out"
+// sits under those in the hierarchy, so a member who picks it still displays
+// under their year — that heading only fills up if it is moved above the
+// cohort roles.
+//
+// Hues are kept apart on purpose: red / orange / lime / green / teal / blue /
+// purple / pink, so no two headings read as the same colour at a glance.
+const ROLE_APPEARANCE = {
+  Founder: { color: 0xf5c542, hoist: true }, // gold
+  Mod: { color: 0xd6334c, hoist: true }, // crimson
+  Professional: { color: 0x12a594, hoist: true }, // teal
+  [PENDING_PROFESSIONAL]: { color: 0x7fd1c4, hoist: true }, // pale teal
+  Freshman: { color: 0x3fbf6f, hoist: true }, // green
+  Sophomore: { color: 0x3b9bd9, hoist: true }, // blue
+  Junior: { color: 0x8a63d2, hoist: true }, // purple
+  Senior: { color: 0xd9509b, hoist: true }, // pink
+  'Recently Graduated': { color: 0xe8833a, hoist: true }, // orange
+  'Professional in Career Transition': { color: 0xa3c939, hoist: true }, // lime
+  'Still Figuring It Out': { color: 0x9aa4b0, hoist: true }, // grey
+};
+
+const appearanceOf = (name) => ROLE_APPEARANCE[name] ?? { color: 0, hoist: false };
+const hex = (color) => (color ? `#${color.toString(16).padStart(6, '0')}` : 'default');
 
 // Discord seeds a new role's permissions from @everyone's at creation time.
 // Left implicit, every role here would silently carry whatever @everyone had
@@ -275,8 +309,10 @@ async function run() {
   }
 
   const roles = await createRoles(guild);
+  await reconcileRoleAppearance(guild, roles);
   await reconcileRolePermissions(guild, roles);
   await orderRoles(guild, roles, me);
+  await assignFounder(guild, roles);
   const channels = await createChannels(guild);
   await lockDownEveryone(guild);
   await applyGating(guild, roles, channels);
@@ -312,20 +348,89 @@ async function createRoles(guild) {
       map[name] = existing.id;
       continue;
     }
+    const look = appearanceOf(name);
     const role = await guild.roles.create({
       name,
-      hoist: SPECIAL_ROLES.includes(name),
+      hoist: look.hoist,
+      color: look.color,
       mentionable: false,
       permissions: ROLE_PERMISSIONS,
       reason: REASON,
     });
-    add(`role "${name}" (no permissions${role.hoist ? ', hoisted' : ''})`);
+    add(
+      `role "${name}" (no permissions, ${hex(look.color)}` +
+        `${role.hoist ? ', own sidebar group' : ''})`,
+    );
     created.set(name, role);
     map[name] = role.id;
   }
 
   writeRoleMap(map);
   return created;
+}
+
+// Adding a role to the guild owner does work — hierarchy is checked against the
+// role being added, not against the owner's untouchable status, so this went
+// through on the first run. The fallback stays because a Founder role nobody
+// holds shows up as nothing at all in the sidebar, and a silent no-op there
+// would be invisible until someone wondered where the group went.
+async function assignFounder(guild, roles) {
+  step('Founder');
+
+  const founder = roles.get('Founder');
+  if (!founder) {
+    warn('Founder role missing — skipping');
+    return;
+  }
+
+  const owner = await guild.fetchOwner();
+  if (owner.roles.cache.has(founder.id)) {
+    same(`${owner.user.tag} already holds "${founder.name}"`);
+    return;
+  }
+
+  try {
+    await owner.roles.add(founder, REASON);
+    add(`gave "${founder.name}" to ${owner.user.tag}`);
+  } catch (err) {
+    warn(`could not give "${founder.name}" to the owner: ${err?.message ?? err}`);
+    console.log(
+      '    Expected — bots cannot modify the server owner. Add it by hand:\n' +
+        `    Server Settings -> Roles -> ${founder.name} -> Manage Members -> add yourself.\n` +
+        '    The sidebar group only appears once someone holds it.',
+    );
+  }
+}
+
+// Colour and hoist are set at creation, which does nothing for the roles that
+// already existed — every one of them, by now. This is what actually applies
+// ROLE_APPEARANCE to a live server, and it re-applies on every run, so editing
+// a colour by hand in Discord will be reverted next time setup runs. Change it
+// in the table above instead.
+async function reconcileRoleAppearance(guild, roles) {
+  step('Role colour and sidebar grouping');
+  let changed = 0;
+
+  for (const name of ROLE_ORDER) {
+    const role = roles.get(name);
+    if (!role) continue;
+
+    const { color, hoist } = appearanceOf(name);
+    if (role.color === color && role.hoist === hoist) continue;
+
+    try {
+      await role.edit({ color, hoist, reason: REASON });
+      add(
+        `"${role.name}": ${hex(color)}` +
+          `${hoist ? ', shown as its own sidebar group' : ', grouped with everyone else'}`,
+      );
+      changed += 1;
+    } catch (err) {
+      warn(`could not restyle "${role.name}": ${err?.message ?? err}`);
+    }
+  }
+
+  console.log(changed ? `  restyled ${changed} role(s)` : '  all roles already styled');
 }
 
 // createRoles skips roles that already exist, so roles created before the
