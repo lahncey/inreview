@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { Client, Events, GatewayIntentBits } from 'discord.js';
 import { installIntroLock } from './intro-lock.js';
 import { installHeartbeat } from './heartbeat.js';
+import { installTickets } from './tickets.js';
 
 const { DISCORD_TOKEN, GUILD_ID } = process.env;
 
@@ -49,6 +50,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 installIntroLock(client, GUILD_ID);
 installHeartbeat(client, GUILD_ID);
+installTickets(client, GUILD_ID);
 
 // Hosts commonly restart only on a non-zero exit, so anything fatal has to
 // exit non-zero rather than letting the process wind down quietly. discord.js

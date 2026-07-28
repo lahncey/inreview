@@ -10,6 +10,13 @@ if (!DISCORD_TOKEN || !CLIENT_ID || !GUILD_ID) {
 
 const commands = [
   new SlashCommandBuilder().setName('ping').setDescription('Replies with Pong!'),
+  // Guild-scoped, so it appears the moment this runs rather than after
+  // Discord's global command propagation. Permission is checked in the
+  // handler, not here: "the person who opened this ticket" is not something
+  // default_member_permissions can express.
+  new SlashCommandBuilder()
+    .setName('close')
+    .setDescription('Close and archive this resume feedback thread'),
 ].map((command) => command.toJSON());
 
 const rest = new REST().setToken(DISCORD_TOKEN);

@@ -228,7 +228,13 @@ const CHANNELS = [
   // actually identifies it.
   { name: 'ask-anything', access: 'gated' },
   { name: 'roles-and-referrals', access: 'gated' },
-  { name: 'resume-and-portfolio', access: 'gated' },
+  // ticketHost: the bot opens private threads here for resume feedback.
+  // Discord only shows a private thread to the people invited to it and to
+  // anyone holding ManageThreads on the channel, and there is no way to invite
+  // a role. Granting Mod that permission is what puts moderators in every
+  // ticket without adding them one id at a time — which would need the
+  // privileged GuildMembers intent to enumerate them in the first place.
+  { name: 'resume-and-portfolio', access: 'gated', ticketHost: true },
   { name: 'wins', access: 'gated' },
   {
     name: 'resources',
@@ -771,6 +777,7 @@ async function applyGating(guild, roles, channels) {
         CreatePublicThreads: true,
         SendMessagesInThreads: true,
         AddReactions: true,
+        ...(spec.ticketHost ? { ManageThreads: true } : {}),
       };
 
       // Reacting is participation too — a visitor reads, a member responds.
@@ -927,6 +934,13 @@ function verifyGating(channels, everyone, introduced, mod) {
       holds(channel, everyone.id, 'deny', PermissionFlagsBits.AddReactions) &&
         holds(channel, introduced.id, 'allow', PermissionFlagsBits.AddReactions),
     );
+
+    if (spec.ticketHost) {
+      check(
+        `${spec.name} Mod can see private threads`,
+        holds(channel, mod.id, 'allow', PermissionFlagsBits.ManageThreads),
+      );
+    }
 
     if (spec.threadOnly) {
       check(
