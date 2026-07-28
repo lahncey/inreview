@@ -234,7 +234,18 @@ const CHANNELS = [
   // a role. Granting Mod that permission is what puts moderators in every
   // ticket without adding them one id at a time — which would need the
   // privileged GuildMembers intent to enumerate them in the first place.
-  { name: 'resume-and-portfolio', access: 'gated', ticketHost: true },
+  //
+  // threadOnly for the same reason as #job-hunt, reached from the other
+  // direction: there, threads keep each week's conversation together; here,
+  // the channel body is just the panel, and a member's resume belongs in
+  // their own private thread rather than in the open. Members post in threads
+  // only — and the only thread they get is the one the button opens for them.
+  {
+    name: 'resume-and-portfolio',
+    access: 'gated',
+    ticketHost: true,
+    threadOnly: true,
+  },
   { name: 'wins', access: 'gated' },
   {
     name: 'resources',
@@ -789,7 +800,17 @@ async function applyGating(guild, roles, channels) {
         // SendMessages governs the channel body only — replies inside a
         // thread are governed by SendMessagesInThreads. Members get the
         // second and not the first, so Mod still opens every thread.
-        introducedPayload.SendMessagesInThreads = true;
+        //
+        // The two denies are not redundant. permissionOverwrites.edit merges
+        // rather than replaces, so a channel that used to be an ordinary gated
+        // one keeps its old allows for any key left unmentioned — turning
+        // threadOnly on would otherwise leave members still posting at top
+        // level, which is exactly what the read-back caught here.
+        Object.assign(introducedPayload, {
+          SendMessages: false,
+          CreatePublicThreads: false,
+          SendMessagesInThreads: true,
+        });
       } else {
         Object.assign(introducedPayload, {
           SendMessages: true,
@@ -947,6 +968,10 @@ function verifyGating(channels, everyone, introduced, mod) {
         `${spec.name} ${ACCESS_ROLE} replies in threads but not at top level`,
         holds(channel, introduced.id, 'allow', PermissionFlagsBits.SendMessagesInThreads) &&
           !holds(channel, introduced.id, 'allow', PermissionFlagsBits.SendMessages),
+      );
+      check(
+        `${spec.name} ${ACCESS_ROLE} cannot open threads of their own`,
+        !holds(channel, introduced.id, 'allow', PermissionFlagsBits.CreatePublicThreads),
       );
       check(
         `${spec.name} Mod may open threads`,

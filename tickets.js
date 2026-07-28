@@ -30,10 +30,11 @@ const OPEN_BUTTON = 'resume-ticket:open';
 const PANEL_SCAN = 50;
 
 const PANEL_TEXT =
-  '## Private resume feedback\n' +
-  'Want eyes on your resume without posting it publicly? Press the button ' +
-  'and a private thread opens here — just you and the moderators.\n\n' +
-  'Nobody else in the server can see it, including other members.';
+  '## Resume Review / Feedback\n' +
+  'Want your resume reviewed and fixed for your upcoming applications? Press ' +
+  'the button and a private thread opens here. Will be reviewed by the team.';
+
+const PANEL_BUTTON_LABEL = 'Request resume feedback';
 
 const log = (msg) => console.log(`tickets: ${msg}`);
 const warn = (msg) => console.warn(`tickets: ${msg}`);
@@ -114,9 +115,19 @@ async function setUp(client, guildId) {
 
 // The panel has to exist exactly once. Rather than remembering a message id —
 // which would be wrong the moment someone deleted the message — look for one
-// that is already there and post only if it is missing. Self-healing either
-// way: delete it and the next restart puts it back.
+// that is already there. Self-healing either way: delete it and the next
+// restart puts it back.
 async function ensurePanel(channel) {
+  const button = new ButtonBuilder()
+    .setCustomId(OPEN_BUTTON)
+    .setLabel(PANEL_BUTTON_LABEL)
+    .setEmoji('📄')
+    .setStyle(ButtonStyle.Primary);
+  const body = {
+    content: PANEL_TEXT,
+    components: [new ActionRowBuilder().addComponents(button)],
+  };
+
   const recent = await channel.messages.fetch({ limit: PANEL_SCAN });
   const existing = recent.find(
     (message) =>
@@ -126,21 +137,18 @@ async function ensurePanel(channel) {
       ),
   );
 
+  // Rewritten on every start rather than compared first. Without the
+  // MessageContent intent a fetched message has empty content and no readable
+  // component labels, so there is nothing to compare against — and an edit
+  // that changes nothing costs one request on a restart, while skipping it
+  // would strand the live panel on whatever copy it was first posted with.
   if (existing) {
-    log(`panel already posted (${existing.id})`);
+    await existing.edit(body);
+    log(`panel refreshed (${existing.id})`);
     return;
   }
 
-  const button = new ButtonBuilder()
-    .setCustomId(OPEN_BUTTON)
-    .setLabel('Request private feedback')
-    .setEmoji('📄')
-    .setStyle(ButtonStyle.Primary);
-
-  const message = await channel.send({
-    content: PANEL_TEXT,
-    components: [new ActionRowBuilder().addComponents(button)],
-  });
+  const message = await channel.send(body);
 
   try {
     await message.pin();
