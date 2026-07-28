@@ -30,20 +30,21 @@ const OPEN_BUTTON = 'resume-ticket:open';
 const PANEL_SCAN = 50;
 
 const PANEL_TEXT =
-  '## Resume Review / Feedback\n' +
-  'Want your resume reviewed and fixed for your upcoming applications? Press ' +
-  'the button and a private thread opens here. Will be reviewed by the team.';
+  '## Resume / Portfolio Review\n' +
+  'Want feedback on your resume/portfolio for your upcoming applications? ' +
+  'Press the button and a private thread opens here. Will be reviewed by the ' +
+  'team.';
 
-const PANEL_BUTTON_LABEL = 'Request resume feedback';
+const PANEL_BUTTON_LABEL = 'Request Feedback';
 
 const log = (msg) => console.log(`tickets: ${msg}`);
 const warn = (msg) => console.warn(`tickets: ${msg}`);
 
 function starterText(user) {
   return (
-    `Hey <@${user.id}>! Let's get to it with this resume review.\n\n` +
-    'Attach your resume, fill out the info below, and give any other context ' +
-    'you want us to know:\n\n' +
+    `Hey <@${user.id}>! Let's get to it with this resume/portfolio review.\n\n` +
+    'Attach your resume/portfolio, fill out the info below, and give any ' +
+    'other context you want us to know:\n\n' +
     '**Target role:**\n' +
     '**Where you are applying:**\n' +
     '**Results so far (none is fine):**\n' +
@@ -100,17 +101,33 @@ export function installTickets(client, guildId) {
 }
 
 async function setUp(client, guildId) {
+  const channel = await ticketChannel(client, guildId);
+  if (!channel) return;
+
+  log(`watching #${channel.name} (${channel.id})`);
+  await ensurePanel(channel);
+  await indexOpenTickets(channel);
+}
+
+async function ticketChannel(client, guildId) {
   const guild = await client.guilds.fetch(guildId);
   const channel = resolveChannel(guild, TICKET_CHANNEL);
 
   if (!channel?.isTextBased()) {
     warn(`#${TICKET_CHANNEL} not found — no panel, no tickets.`);
-    return;
+    return null;
   }
+  return channel;
+}
 
-  log(`watching #${channel.name} (${channel.id})`);
+// The panel is only rewritten when the bot starts, which makes editing its
+// copy mean redeploying and waiting. This is the same write on demand, for a
+// one-shot script — no gateway handlers, so it is safe to run while the
+// deployed bot is up, unlike starting a second bot.
+export async function refreshPanel(client, guildId) {
+  const channel = await ticketChannel(client, guildId);
+  if (!channel) return;
   await ensurePanel(channel);
-  await indexOpenTickets(channel);
 }
 
 // The panel has to exist exactly once. Rather than remembering a message id —

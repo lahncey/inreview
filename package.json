@@ -12,6 +12,7 @@
     "deploy": "node deploy-commands.js",
     "setup": "node setup.js",
     "identity": "node identity.js",
+    "panel": "node panel.js",
     "audit": "node audit.js"
   },
   "keywords": [],
