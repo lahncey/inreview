@@ -38,17 +38,19 @@ const PANEL_TEXT =
 const log = (msg) => console.log(`tickets: ${msg}`);
 const warn = (msg) => console.warn(`tickets: ${msg}`);
 
-function starterText(user, modRole) {
-  const mod = modRole ? `<@&${modRole.id}>` : 'A moderator';
+function starterText(user) {
   return (
-    `<@${user.id}> — welcome. ${mod} will pick this up.\n\n` +
-    'Attach your resume and fill this in:\n\n' +
-    '**Target role**\n' +
-    '**Where you are applying**\n' +
-    '**Results so far**\n' +
-    '**What you need help with**\n\n' +
-    'The more specific the last one, the more useful the feedback. When you ' +
-    'are done, run `/close` to archive the thread.'
+    `Hey <@${user.id}>! Let's get to it with this resume review.\n\n` +
+    'Attach your resume, fill out the info below, and give any other context ' +
+    'you want us to know:\n\n' +
+    '**Target role:**\n' +
+    '**Where you are applying:**\n' +
+    '**Results so far (none is fine):**\n' +
+    '**What you need help with:**\n' +
+    '**Anything else:**\n\n' +
+    'The more specific the last one, the more useful the feedback.\n\n' +
+    "When we're done reviewing, you can use `/close` to archive the thread — " +
+    'or leave it open and look back at our session.'
   );
 }
 
@@ -202,7 +204,6 @@ async function openTicket(interaction) {
   const channel = interaction.channel;
   const guild = interaction.guild;
   const accessRole = resolveRole(guild, ACCESS_ROLE);
-  const modRole = resolveRole(guild, MOD_ROLE);
 
   // A visitor could otherwise open a ticket they cannot type in: the thread
   // inherits the parent's permissions, and SendMessagesInThreads there belongs
@@ -237,15 +238,12 @@ async function openTicket(interaction) {
 
   await thread.members.add(interaction.user.id);
 
-  // Default parsing already pings both, verified against a live send. This is
-  // belt and braces: it pins the mention set to exactly two entries, so a
-  // username or template edit can never widen it into something unintended.
+  // Pinned to the requester alone. The greeting is the only mention in the
+  // template, and constraining it here means a future edit cannot accidentally
+  // turn a stray @ into a server-wide ping.
   await thread.send({
-    content: starterText(interaction.user, modRole),
-    allowedMentions: {
-      users: [interaction.user.id],
-      roles: modRole ? [modRole.id] : [],
-    },
+    content: starterText(interaction.user),
+    allowedMentions: { users: [interaction.user.id], roles: [] },
   });
 
   openTickets.set(interaction.user.id, thread.id);
